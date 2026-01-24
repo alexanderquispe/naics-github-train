@@ -43,7 +43,7 @@ naics-github-train/
 ├── .gitignore                   # Git ignore rules
 ├── data/
 │   ├── raw/                     # Original data files
-│   │   └── usa_2k_gpt_ab8score.parquet
+│   │   └── train_data_gpt_ab8score.parquet
 │   └── processed/               # Processed data
 ├── src/
 │   ├── __init__.py
@@ -68,7 +68,7 @@ naics-github-train/
 Train a classifier using the default ModernBERT model:
 
 ```bash
-python scripts/train.py --model modernbert-base --data data/raw/usa_2k_gpt_ab8score.parquet
+python scripts/train.py --model modernbert-base --data data/raw/train_data_gpt_ab8score.parquet
 ```
 
 Training with custom parameters:
@@ -95,7 +95,7 @@ Available models:
 ```bash
 python scripts/evaluate.py \
     --model models/modernbert-base-naics-classifier \
-    --test-data data/raw/usa_2k_gpt_ab8score.parquet \
+    --test-data data/raw/train_data_gpt_ab8score.parquet \
     --plot
 ```
 
@@ -137,7 +137,7 @@ from src.trainer import setup_model, train_model
 from src.inference import load_trained_model, predict_naics
 
 # Load and prepare data
-raw_data = load_parquet_data("data/raw/usa_2k_gpt_ab8score.parquet")
+raw_data = load_parquet_data("data/raw/train_data_gpt_ab8score.parquet")
 processed_df, label2id, id2label = prepare_naics_dataset(raw_data)
 
 # Load trained model for inference
@@ -239,7 +239,7 @@ Typical performance on the test set:
 
 ```bash
 # Test data loading
-python -c "from src.data_loader import load_parquet_data; print(load_parquet_data('data/raw/usa_2k_gpt_ab8score.parquet').head())"
+python -c "from src.data_loader import load_parquet_data; print(load_parquet_data('data/raw/train_data_gpt_ab8score.parquet').head())"
 
 # Test NAICS mapping
 python -c "from src.naics_mapping import get_naics_description; print(get_naics_description('52'))"

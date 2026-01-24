@@ -6,7 +6,7 @@ This script provides a CLI interface for training transformer models
 to classify GitHub repositories into NAICS codes.
 
 Usage:
-    python scripts/train.py --model modernbert-base --data data/raw/usa_2k_gpt_ab8score.parquet
+    python scripts/train.py --model modernbert-base --data data/raw/train_data_gpt_ab8score.parquet
     python scripts/train.py --model deberta-v3-base --epochs 10 --batch-size 8
 """
 
@@ -81,7 +81,7 @@ def parse_args():
     parser.add_argument(
         "--data",
         type=str,
-        default=str(RAW_DATA_DIR / "usa_2k_gpt_ab8score.parquet"),
+        default=str(RAW_DATA_DIR / "train_data_gpt_ab8score.parquet"),
         help="Path to training data (parquet file)",
     )
     parser.add_argument(

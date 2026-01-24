@@ -126,7 +126,7 @@ class DataConfig:
     clean_text: bool = True
 
     # Default data file
-    default_data_file: str = "usa_2k_gpt_ab8score.parquet"
+    default_data_file: str = "train_data_gpt_ab8score.parquet"
 
     @property
     def default_data_path(self) -> Path:

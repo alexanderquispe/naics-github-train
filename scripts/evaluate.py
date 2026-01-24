@@ -65,7 +65,7 @@ def parse_args():
     parser.add_argument(
         "--test-data",
         type=str,
-        default=str(RAW_DATA_DIR / "usa_2k_gpt_ab8score.parquet"),
+        default=str(RAW_DATA_DIR / "train_data_gpt_ab8score.parquet"),
         help="Path to test data (parquet file)",
     )
     parser.add_argument(
