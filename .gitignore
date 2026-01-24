@@ -30,7 +30,7 @@ wheels/
 
 # Jupyter Notebook
 .ipynb_checkpoints/
-*.ipynb
+naics_training_gptdata.ipynb
 
 # Environment
 .env
