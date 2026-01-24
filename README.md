@@ -22,7 +22,7 @@ This project trains transformer models (ModernBERT, DeBERTa, RoBERTa) to automat
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/naics-github-train.git
+git clone https://github.com/alexanderquispe/naics-github-train.git
 cd naics-github-train
 
 # Create virtual environment
@@ -31,6 +31,36 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 # Install dependencies
 pip install -r requirements.txt
+```
+
+## Quick Start with Pre-trained Model
+
+If you want to use the pre-trained model for inference (without training your own):
+
+### Option 1: Train Your Own Model (Recommended)
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Train the model (~4 minutes on GPU)
+python scripts/train.py --model roberta-base --epochs 8 --batch-size 16
+```
+
+### Option 2: Download Pre-trained Model
+
+The trained model files are too large for GitHub. Download from:
+- **Google Drive:** [Contact repository maintainer for link]
+- **Hugging Face Hub:** [Coming soon]
+
+After downloading, place the model folder in `models/roberta-base-naics-classifier/`.
+
+### Option 3: Use the Inference Notebook
+
+Open `notebooks/inference_demo.ipynb` in Jupyter for an interactive demo with examples.
+
+```bash
+jupyter notebook notebooks/inference_demo.ipynb
 ```
 
 ## Project Structure
@@ -57,6 +87,8 @@ naics-github-train/
 │   ├── train.py                 # CLI training script
 │   ├── evaluate.py              # Evaluation script
 │   └── predict.py               # Prediction script
+├── notebooks/
+│   └── inference_demo.ipynb     # Demo notebook for inference
 ├── models/                      # Saved model checkpoints
 └── outputs/                     # Training logs & outputs
 ```
@@ -223,15 +255,20 @@ training_config = TrainingConfig(
 
 ## Model Performance
 
-Typical performance on the test set:
+Performance on the test set (8 epochs, batch size 16):
 
-| Model | F1 Score | Accuracy |
-|-------|----------|----------|
-| ModernBERT-base | ~0.85 | ~0.86 |
-| DeBERTa-v3-base | ~0.82 | ~0.83 |
-| RoBERTa-base | ~0.80 | ~0.81 |
+| Model | F1 Score | Accuracy | Training Time |
+|-------|----------|----------|---------------|
+| RoBERTa-base | **79.3%** | **81.3%** | ~4 min (GPU) |
 
-*Performance varies based on data quality and hyperparameters.*
+*Performance varies based on data quality, hyperparameters, and training data size.*
+
+### Training Details
+
+- **Dataset:** 2,538 GitHub repositories with NAICS labels
+- **Train/Val/Test Split:** 70% / 10% / 20%
+- **Classes:** 19 NAICS industry sectors
+- **Hardware:** NVIDIA RTX 3080 (16GB)
 
 ## Development
 
