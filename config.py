@@ -125,8 +125,11 @@ class DataConfig:
     max_readme_words: Optional[int] = None  # No limit by default
     clean_text: bool = True
 
+    # Class filtering
+    min_samples_per_class: int = 80  # Exclude classes with fewer samples
+
     # Default data file
-    default_data_file: str = "train_data_gpt_ab8score.parquet"
+    default_data_file: str = "train_data_naics_github.parquet"
 
     @property
     def default_data_path(self) -> Path:

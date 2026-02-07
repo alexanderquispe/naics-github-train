@@ -29,6 +29,7 @@ def setup_model(
     num_labels: int,
     label2id: Dict[str, int],
     id2label: Dict[int, str],
+    gradient_checkpointing: bool = False,
 ) -> Tuple[AutoModelForSequenceClassification, AutoTokenizer]:
     """
     Set up the model and tokenizer for training.
@@ -38,6 +39,7 @@ def setup_model(
         num_labels: Number of classification labels
         label2id: Mapping from labels to IDs
         id2label: Mapping from IDs to labels
+        gradient_checkpointing: Enable gradient checkpointing to reduce memory usage
 
     Returns:
         Tuple of (model, tokenizer)
@@ -57,6 +59,11 @@ def setup_model(
         label2id=label2id,
         id2label=id2label,
     )
+
+    # Enable gradient checkpointing if requested
+    if gradient_checkpointing:
+        model.gradient_checkpointing_enable()
+        logger.info("Gradient checkpointing enabled (trades compute for memory)")
 
     # Log model info
     total_params = sum(p.numel() for p in model.parameters())

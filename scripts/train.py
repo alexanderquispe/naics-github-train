@@ -6,7 +6,7 @@ This script provides a CLI interface for training transformer models
 to classify GitHub repositories into NAICS codes.
 
 Usage:
-    python scripts/train.py --model modernbert-base --data data/raw/train_data_gpt_ab8score.parquet
+    python scripts/train.py --model modernbert-base --data data/raw/train_data_naics_github.parquet
     python scripts/train.py --model deberta-v3-base --epochs 10 --batch-size 8
 """
 
@@ -81,7 +81,7 @@ def parse_args():
     parser.add_argument(
         "--data",
         type=str,
-        default=str(RAW_DATA_DIR / "train_data_gpt_ab8score.parquet"),
+        default=str(RAW_DATA_DIR / "train_data_naics_github.parquet"),
         help="Path to training data (parquet file)",
     )
     parser.add_argument(
@@ -89,6 +89,12 @@ def parse_args():
         type=str,
         default="code",
         help="Column name containing NAICS codes",
+    )
+    parser.add_argument(
+        "--min-samples",
+        type=int,
+        default=80,
+        help="Minimum samples per class. Classes with fewer samples are excluded.",
     )
     parser.add_argument(
         "--test-size",
@@ -137,8 +143,13 @@ def parse_args():
     parser.add_argument(
         "--early-stopping-patience",
         type=int,
-        default=2,
+        default=5,
         help="Early stopping patience (evaluations)",
+    )
+    parser.add_argument(
+        "--gradient-checkpointing",
+        action="store_true",
+        help="Enable gradient checkpointing to reduce memory usage (allows larger batch sizes)",
     )
 
     # Output arguments
@@ -181,9 +192,12 @@ def main():
     # Log configuration
     logger.info(f"Model: {args.model}")
     logger.info(f"Data: {args.data}")
+    logger.info(f"Min samples per class: {args.min_samples}")
     logger.info(f"Epochs: {args.epochs}")
     logger.info(f"Batch size: {args.batch_size}")
     logger.info(f"Learning rate: {args.learning_rate}")
+    logger.info(f"Early stopping patience: {args.early_stopping_patience}")
+    logger.info(f"Gradient checkpointing: {args.gradient_checkpointing}")
 
     # Set output directory
     if args.output is None:
@@ -214,6 +228,7 @@ def main():
     processed_df, label2id, id2label = prepare_naics_dataset(
         raw_data,
         target_column=args.target_column,
+        min_samples_per_class=args.min_samples,
     )
 
     logger.info(f"Processed {len(processed_df)} examples")
@@ -252,6 +267,7 @@ def main():
         num_labels=num_labels,
         label2id=label2id,
         id2label=id2label,
+        gradient_checkpointing=args.gradient_checkpointing,
     )
 
     # Tokenize dataset

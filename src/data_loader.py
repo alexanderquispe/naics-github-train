@@ -211,6 +211,7 @@ def prepare_naics_dataset(
     target_column: str = "code",
     clean_text: bool = True,
     max_readme_words: Optional[int] = None,
+    min_samples_per_class: Optional[int] = None,
 ) -> Tuple[pd.DataFrame, Dict[str, int], Dict[int, str]]:
     """
     Prepare the NAICS dataset for model training.
@@ -220,6 +221,8 @@ def prepare_naics_dataset(
         target_column: Column containing NAICS codes
         clean_text: Whether to clean text content
         max_readme_words: Maximum README words to include
+        min_samples_per_class: Minimum samples required per class.
+            Classes with fewer samples will be excluded.
 
     Returns:
         Tuple of (processed DataFrame, label2id mapping, id2label mapping)
@@ -234,6 +237,20 @@ def prepare_naics_dataset(
 
     logger.info(f"After cleaning: {len(df)} examples")
     logger.info(f"Unique NAICS codes: {df[target_column].nunique()}")
+
+    # Filter out classes with too few samples
+    if min_samples_per_class is not None and min_samples_per_class > 0:
+        class_counts = df[target_column].value_counts()
+        valid_classes = class_counts[class_counts >= min_samples_per_class].index.tolist()
+        excluded_classes = class_counts[class_counts < min_samples_per_class]
+
+        if len(excluded_classes) > 0:
+            logger.info(f"Excluding {len(excluded_classes)} classes with < {min_samples_per_class} samples:")
+            for code, count in excluded_classes.items():
+                logger.info(f"  - Code {code}: {count} samples")
+
+        df = df[df[target_column].isin(valid_classes)]
+        logger.info(f"After filtering: {len(df)} examples, {len(valid_classes)} classes")
 
     # Clean topics if available
     if "topics" in df.columns:
