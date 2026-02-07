@@ -1,208 +1,181 @@
-# NAICS GitHub Repository Classifier using Transformers
+# NAICS GitHub Repository Classifier
 
 Fine-tuning transformer models to classify GitHub repositories into NAICS (North American Industry Classification System) codes based on repository metadata.
 
+## Model Performance
+
+| Model | Test F1 | Test Accuracy | Training Time |
+|-------|---------|---------------|---------------|
+| **RoBERTa-large** | **86.33%** | **86.72%** | ~8 min (A100) |
+
+**Pre-trained model available:** [huggingface.co/alexanderquispe/naics-github-classifier](https://huggingface.co/alexanderquispe/naics-github-classifier)
+
+## Quick Start
+
+### Use Pre-trained Model (Recommended)
+
+```python
+from transformers import pipeline
+
+classifier = pipeline(
+    "text-classification",
+    model="alexanderquispe/naics-github-classifier"
+)
+
+text = "Repository: bank-api | Description: REST API for banking transactions | README: Secure financial API"
+result = classifier(text)
+print(result)
+# [{'label': '52', 'score': 0.9368}]  # Finance and Insurance
+```
+
+### Train Your Own Model
+
+```bash
+# Clone and install
+git clone https://github.com/alexanderquispe/naics-github-train.git
+cd naics-github-train
+pip install -r requirements.txt
+
+# Train RoBERTa-large (~8 min on A100)
+python scripts/train.py \
+    --model roberta-large \
+    --data data/raw/train_data_gpt_ab8_score_with_code.parquet \
+    --batch-size 32 \
+    --epochs 8
+```
+
+### Google Colab
+
+```python
+!git clone https://github.com/alexanderquispe/naics-github-train.git
+%cd naics-github-train
+!pip install -q transformers datasets accelerate scikit-learn
+
+!python scripts/train.py \
+    --model roberta-large \
+    --data data/raw/train_data_gpt_ab8_score_with_code.parquet \
+    --batch-size 32 \
+    --epochs 8
+```
+
 ## Overview
 
-This project trains transformer models (ModernBERT, DeBERTa, RoBERTa) to automatically classify GitHub repositories into industry categories using the NAICS coding system. The classifier uses repository metadata including:
+This project trains transformer models (RoBERTa, ModernBERT, DeBERTa) to automatically classify GitHub repositories into industry categories using the NAICS coding system. The classifier uses repository metadata including:
 
 - Repository name
 - Description
 - Topics/tags
 - README content
 
-## Installation
+## Training Details
 
-### Prerequisites
-
-- Python 3.9+
-- CUDA-capable GPU (recommended for training)
-
-### Setup
-
-```bash
-# Clone the repository
-git clone https://github.com/alexanderquispe/naics-github-train.git
-cd naics-github-train
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-```
-
-## Quick Start with Pre-trained Model
-
-If you want to use the pre-trained model for inference (without training your own):
-
-### Option 1: Train Your Own Model (Recommended)
-
-```bash
-# Install dependencies
-pip install -r requirements.txt
-
-# Train the model (~4 minutes on GPU)
-python scripts/train.py --model roberta-base --epochs 8 --batch-size 16
-```
-
-### Option 2: Download Pre-trained Model
-
-The trained model files are too large for GitHub. Download from:
-- **Google Drive:** [Contact repository maintainer for link]
-- **Hugging Face Hub:** [Coming soon]
-
-After downloading, place the model folder in `models/roberta-base-naics-classifier/`.
-
-### Option 3: Use the Inference Notebook
-
-Open `notebooks/inference_demo.ipynb` in Jupyter for an interactive demo with examples.
-
-```bash
-jupyter notebook notebooks/inference_demo.ipynb
-```
+| Property | Value |
+|----------|-------|
+| **Dataset** | 6,588 GitHub repositories |
+| **Train/Val/Test Split** | 70% / 10% / 20% (4,611 / 659 / 1,318) |
+| **Classes** | 19 NAICS industry sectors |
+| **Base Model** | RoBERTa-large (355M parameters) |
+| **Batch Size** | 32 |
+| **Learning Rate** | 1.5e-05 |
+| **Epochs** | 8 |
+| **Max Sequence Length** | 512 |
+| **Hardware** | NVIDIA A100 40GB |
 
 ## Project Structure
 
 ```
 naics-github-train/
 ├── README.md                    # This file
+├── MODEL_CARD.md                # Hugging Face model card
 ├── requirements.txt             # Python dependencies
 ├── config.py                    # Configuration settings
-├── .gitignore                   # Git ignore rules
 ├── data/
-│   ├── raw/                     # Original data files
-│   │   └── train_data_naics_github.parquet
-│   └── processed/               # Processed data
+│   └── raw/
+│       └── train_data_gpt_ab8_score_with_code.parquet
 ├── src/
-│   ├── __init__.py
 │   ├── data_loader.py           # Data loading & preprocessing
-│   ├── naics_mapping.py         # NAICS code descriptions
 │   ├── trainer.py               # Model training pipeline
 │   ├── inference.py             # Prediction functions
-│   ├── metrics.py               # Evaluation metrics
-│   └── visualization.py         # Plotting functions
+│   └── metrics.py               # Evaluation metrics
 ├── scripts/
 │   ├── train.py                 # CLI training script
 │   ├── evaluate.py              # Evaluation script
 │   └── predict.py               # Prediction script
 ├── notebooks/
-│   └── inference_demo.ipynb     # Demo notebook for inference
-├── models/                      # Saved model checkpoints
-└── outputs/                     # Training logs & outputs
+│   └── inference_demo.ipynb     # Demo notebook
+└── models/                      # Saved model checkpoints
 ```
 
 ## Usage
 
-### Training a Model
-
-Train a classifier using the default ModernBERT model:
+### Training Options
 
 ```bash
-python scripts/train.py --model modernbert-base --data data/raw/train_data_naics_github.parquet
+# RoBERTa-large (best performance)
+python scripts/train.py --model roberta-large --batch-size 32 --epochs 8
+
+# RoBERTa-base (faster training)
+python scripts/train.py --model roberta-base --batch-size 16 --epochs 8
+
+# With gradient checkpointing (for limited GPU memory)
+python scripts/train.py --model roberta-large --batch-size 8 --gradient-checkpointing
 ```
-
-Training with custom parameters:
-
-```bash
-python scripts/train.py \
-    --model deberta-v3-base \
-    --epochs 10 \
-    --batch-size 8 \
-    --learning-rate 2e-5 \
-    --min-samples 80 \
-    --output models/deberta-naics
-```
-
-The `--min-samples` parameter filters out NAICS categories with fewer than the specified number of samples (default: 80). This improves model stability by excluding underrepresented classes.
 
 Available models:
-- `modernbert-base` - ModernBERT base (recommended, supports long sequences)
+- `roberta-large` - RoBERTa large (recommended)
+- `roberta-base` - RoBERTa base
+- `modernbert-base` - ModernBERT base
 - `modernbert-large` - ModernBERT large
 - `deberta-v3-base` - DeBERTa v3 base
 - `deberta-v3-large` - DeBERTa v3 large
-- `roberta-base` - RoBERTa base
-- `roberta-large` - RoBERTa large
-
-### Evaluating a Model
-
-```bash
-python scripts/evaluate.py \
-    --model models/modernbert-base-naics-classifier \
-    --test-data data/raw/train_data_naics_github.parquet \
-    --plot
-```
 
 ### Making Predictions
 
-Single prediction:
-
-```bash
-python scripts/predict.py \
-    --model models/modernbert-base-naics-classifier \
-    --input "Repository: bank-api | Description: Banking API for financial transactions"
-```
-
-From repository components:
-
-```bash
-python scripts/predict.py \
-    --model models/modernbert-base-naics-classifier \
-    --repo-name bank-api \
-    --description "Banking API for financial transactions" \
-    --show-description \
-    --show-confidence
-```
-
-Batch prediction from file:
-
-```bash
-python scripts/predict.py \
-    --model models/modernbert-base-naics-classifier \
-    --input-file repos.csv \
-    --output predictions.csv
-```
-
-### Python API
-
 ```python
-from src.data_loader import load_parquet_data, prepare_naics_dataset
-from src.trainer import setup_model, train_model
-from src.inference import load_trained_model, predict_naics
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
+import torch
 
-# Load and prepare data
-raw_data = load_parquet_data("data/raw/train_data_naics_github.parquet")
-processed_df, label2id, id2label = prepare_naics_dataset(raw_data)
+model = AutoModelForSequenceClassification.from_pretrained("alexanderquispe/naics-github-classifier")
+tokenizer = AutoTokenizer.from_pretrained("alexanderquispe/naics-github-classifier")
 
-# Load trained model for inference
-model, tokenizer, label_mappings = load_trained_model("models/classifier")
+text = "Repository: mediscan | Description: AI diagnostic tool for radiology | README: Medical imaging analysis..."
 
-# Make prediction
-result = predict_naics(
-    text="Repository: bank-api | Description: Banking API",
-    model=model,
-    tokenizer=tokenizer,
-    label_mappings=label_mappings,
-)
-print(f"Predicted NAICS: {result['predicted_naics']}")
+inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
+outputs = model(**inputs)
+predicted_class = torch.argmax(outputs.logits, dim=1).item()
+
+id2label = model.config.id2label
+print(f"Predicted NAICS: {id2label[predicted_class]}")
 ```
+
+## Input Format
+
+The model expects text in this format:
+
+```
+Repository: {repo_name} | Description: {description} | Topics: {topics} | README: {readme_content}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| Repository | Yes | Repository name |
+| Description | No | Short description |
+| Topics | No | Semicolon-separated tags |
+| README | No | README content |
 
 ## Data Format
 
-The training data should be a parquet file with the following columns:
+Training data should be a parquet file with these columns:
 
 | Column | Description | Required |
 |--------|-------------|----------|
 | `code` | NAICS code (2-digit) | Yes |
-| `name_repo` or `repo` | Repository name | Recommended |
+| `name_repo` | Repository name | Yes |
 | `description` | Repository description | Recommended |
 | `topics` | GitHub topics/tags | Optional |
 | `readme_content` | README text | Optional |
 
-## NAICS Codes Reference
-
-The classifier predicts 2-digit NAICS sector codes:
+## NAICS Codes (19 Classes)
 
 | Code | Sector |
 |------|--------|
@@ -218,102 +191,33 @@ The classifier predicts 2-digit NAICS sector codes:
 | 52 | Finance and Insurance |
 | 53 | Real Estate and Rental and Leasing |
 | 54 | Professional, Scientific, and Technical Services |
-| 55 | Management of Companies and Enterprises |
 | 56 | Administrative and Support Services |
 | 61 | Educational Services |
 | 62 | Health Care and Social Assistance |
 | 71 | Arts, Entertainment, and Recreation |
 | 72 | Accommodation and Food Services |
-| 81 | Other Services (except Public Administration) |
+| 81 | Other Services |
 | 92 | Public Administration |
 
-## Configuration
-
-Edit `config.py` to customize:
-
-- **Model settings**: Default model, max sequence length
-- **Training parameters**: Epochs, batch size, learning rate, etc.
-- **Data paths**: Input/output directories
-- **Supported models**: Add new model architectures
-
-Key configuration options:
-
-```python
-from config import ModelConfig, TrainingConfig, DataConfig
-
-# Model configuration
-model_config = ModelConfig(
-    model_name="modernbert-base",
-    max_seq_length=2048,
-)
-
-# Training configuration
-training_config = TrainingConfig(
-    num_epochs=8,
-    batch_size=8,
-    learning_rate=1.5e-5,
-    early_stopping_patience=2,
-)
-```
-
-## Model Performance
-
-Performance on the test set (8 epochs, batch size 16):
-
-| Model | F1 Score | Accuracy | Training Time |
-|-------|----------|----------|---------------|
-| RoBERTa-base | **79.3%** | **81.3%** | ~4 min (GPU) |
-
-*Performance varies based on data quality, hyperparameters, and training data size.*
-
-### Training Details
-
-- **Dataset:** 2,538 GitHub repositories with NAICS labels
-- **Train/Val/Test Split:** 70% / 10% / 20%
-- **Classes:** 19 NAICS industry sectors
-- **Hardware:** NVIDIA RTX 3080 (16GB)
-
-## Development
-
-### Running Tests
-
-```bash
-# Test data loading
-python -c "from src.data_loader import load_parquet_data; print(load_parquet_data('data/raw/train_data_naics_github.parquet').head())"
-
-# Test NAICS mapping
-python -c "from src.naics_mapping import get_naics_description; print(get_naics_description('52'))"
-```
-
-### Adding New Models
-
-1. Add the model to `SUPPORTED_MODELS` in `config.py`:
-   ```python
-   SUPPORTED_MODELS["new-model"] = "huggingface/model-id"
-   ```
-
-2. Adjust `max_seq_length` in `ModelConfig.__post_init__()` if needed.
+*Note: Code 55 (Management of Companies) excluded due to insufficient training samples (<80).*
 
 ## Troubleshooting
 
 ### CUDA Out of Memory
 
-- Reduce `--batch-size` (try 4 or 2)
-- Reduce `--max-seq-length` (try 1024 or 512)
-- Use gradient accumulation (increase `gradient_accumulation_steps` in config)
+```bash
+# Use gradient checkpointing
+python scripts/train.py --model roberta-large --batch-size 8 --gradient-checkpointing
+
+# Or reduce batch size
+python scripts/train.py --model roberta-large --batch-size 4
+```
 
 ### Slow Training
 
-- Enable bf16 training (default if GPU supports it)
-- Use fused optimizer (default)
-- Increase `--batch-size` if memory allows
-
-### Poor Model Performance
-
-- Increase training epochs
-- Adjust learning rate
-- Check data quality and class balance
-- Try different model architectures
+- Use A100 or similar GPU for best performance
+- Increase batch size if memory allows
+- Enable BF16 (default on supported GPUs)
 
 ## License
 
@@ -322,5 +226,4 @@ MIT License
 ## Acknowledgments
 
 - [Hugging Face Transformers](https://huggingface.co/transformers/)
-- [ModernBERT](https://huggingface.co/answerdotai/ModernBERT-base)
 - [NAICS Association](https://www.naics.com/)
