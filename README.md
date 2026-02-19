@@ -96,11 +96,14 @@ naics-github-train/
 │   ├── data_loader.py           # Data loading & preprocessing
 │   ├── trainer.py               # Model training pipeline
 │   ├── inference.py             # Prediction functions
+│   ├── naics_mapping.py         # NAICS code mappings
 │   └── metrics.py               # Evaluation metrics
 ├── scripts/
 │   ├── train.py                 # CLI training script
 │   ├── evaluate.py              # Evaluation script
-│   └── predict.py               # Prediction script
+│   ├── predict.py               # Prediction script
+│   ├── inference_batch.py       # Batch inference on parquet files
+│   └── plot_industry_adoption.py # Industry adoption visualizations
 ├── notebooks/
 │   └── inference_demo.ipynb     # Demo notebook
 └── models/                      # Saved model checkpoints
@@ -146,6 +149,37 @@ predicted_class = torch.argmax(outputs.logits, dim=1).item()
 
 id2label = model.config.id2label
 print(f"Predicted NAICS: {id2label[predicted_class]}")
+```
+
+### Batch Inference
+
+Run predictions on a parquet file with repository data:
+
+```bash
+# Basic usage
+python scripts/inference_batch.py \
+    --input data/repos.parquet \
+    --output predictions.parquet
+
+# With options
+python scripts/inference_batch.py \
+    --input data/repos.parquet \
+    --output predictions.parquet \
+    --batch-size 32 \
+    --limit 1000  # For testing
+```
+
+The input parquet should have columns: `name` (or `name_repo`), `description`, `topics`, `readme` (or `readme_content`).
+
+### Industry Adoption Visualization
+
+Generate adoption charts by industry:
+
+```bash
+python scripts/plot_industry_adoption.py
+
+# With custom data directory
+python scripts/plot_industry_adoption.py --raw-data-dir /path/to/data
 ```
 
 ## Input Format
