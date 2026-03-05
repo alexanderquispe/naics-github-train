@@ -253,9 +253,21 @@ python scripts/train.py --model roberta-large --batch-size 4
 - Increase batch size if memory allows
 - Enable BF16 (default on supported GPUs)
 
+## Citation
+@misc{naics-github-classifier,
+  author = {{GitHub, Inc.} and Xu, Kevin and Quispe, Alexander},
+  title = {NAICS GitHub Repository Classifier},
+  year = {2025},
+  publisher = {Hugging Face},
+  url = {https://huggingface.co/alexanderquispe/naics-github-classifier}
+}
+
 ## License
 
 MIT License
+
+
+
 
 ## Acknowledgments
 
