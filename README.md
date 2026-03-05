@@ -254,6 +254,8 @@ python scripts/train.py --model roberta-large --batch-size 4
 - Enable BF16 (default on supported GPUs)
 
 ## Citation
+
+```bibtex
 @misc{naics-github-classifier,
   author = {{GitHub, Inc.} and Xu, Kevin and Quispe, Alexander},
   title = {NAICS GitHub Repository Classifier},
@@ -261,6 +263,7 @@ python scripts/train.py --model roberta-large --batch-size 4
   publisher = {Hugging Face},
   url = {https://huggingface.co/alexanderquispe/naics-github-classifier}
 }
+```
 
 ## License
 
