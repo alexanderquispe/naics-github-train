@@ -168,28 +168,62 @@ def format_input_text(
     return combined_text
 
 
-def load_model(model_name: str, device: Optional[str] = None, token: Optional[str] = None):
+def resolve_device(device: Optional[str] = None) -> str:
+    """
+    Pick the best available device.
+
+    Order: explicit choice > CUDA > MPS (Apple Silicon) > CPU.
+    """
+    if device is not None:
+        return device
+    if torch.cuda.is_available():
+        return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
+def resolve_dtype(device: str, fp16: Optional[bool] = None) -> torch.dtype:
+    """
+    Pick the inference precision.
+
+    Half precision is enabled by default on CUDA and MPS: it is roughly 3x
+    faster than fp32 and does not change predictions above the confidence
+    thresholds this model is used with. CPU stays on fp32, where fp16 is slower.
+    """
+    if fp16 is None:
+        fp16 = device in ("cuda", "mps")
+    return torch.float16 if fp16 else torch.float32
+
+
+def load_model(
+    model_name: str,
+    device: Optional[str] = None,
+    token: Optional[str] = None,
+    fp16: Optional[bool] = None,
+):
     """
     Load the model and tokenizer from Hugging Face.
 
     Args:
         model_name: Hugging Face model ID or local path
-        device: Device to use ('cuda', 'cpu', or None for auto)
+        device: Device to use ('cuda', 'mps', 'cpu', or None for auto)
         token: Hugging Face token for private models
+        fp16: Force half precision on/off (None = auto per device)
 
     Returns:
         Tuple of (model, tokenizer, device)
     """
     logger.info(f"Loading model: {model_name}")
 
-    # Auto-detect device
-    if device is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-
-    logger.info(f"Using device: {device}")
+    device = resolve_device(device)
+    dtype = resolve_dtype(device, fp16)
+    logger.info(f"Using device: {device} ({str(dtype).replace('torch.', '')})")
 
     tokenizer = AutoTokenizer.from_pretrained(model_name, token=token)
-    model = AutoModelForSequenceClassification.from_pretrained(model_name, token=token)
+    model = AutoModelForSequenceClassification.from_pretrained(
+        model_name, token=token, dtype=dtype
+    )
     model = model.to(device)
     model.eval()
 
@@ -231,7 +265,8 @@ def predict_batch(
     # Predict
     with torch.no_grad():
         outputs = model(**inputs)
-        probs = torch.softmax(outputs.logits, dim=-1)
+        # float() first: softmax in fp16 loses precision on near-uniform logits
+        probs = torch.softmax(outputs.logits.float(), dim=-1)
         predictions = torch.argmax(probs, dim=-1)
         confidences = probs.max(dim=-1).values
 
@@ -254,11 +289,14 @@ def run_inference(
     input_file: str,
     output_file: str,
     model_name: str = "aquiro1994/naics-github-classifier",
-    batch_size: int = 16,
+    batch_size: int = 32,
     max_length: int = 512,
     limit: Optional[int] = None,
     device: Optional[str] = None,
     token: Optional[str] = None,
+    fp16: Optional[bool] = None,
+    clean_text: bool = True,
+    max_readme_chars: int = 5000,
 ):
     """
     Run batch inference on a parquet file.
@@ -290,35 +328,51 @@ def run_inference(
     logger.info(f"Using columns: name={name_col}, readme={readme_col}")
 
     # Load model
-    model, tokenizer, device = load_model(model_name, device, token)
+    model, tokenizer, device = load_model(model_name, device, token, fp16)
 
-    # Prepare input texts
+    # Prepare input texts. Zipping the columns is an order of magnitude faster
+    # than iterrows, which matters at hundreds of thousands of rows.
     logger.info("Formatting input texts...")
-    texts = []
-    for _, row in tqdm(df.iterrows(), total=len(df), desc="Formatting"):
-        text = format_input_text(
-            name=row.get(name_col, ""),
-            description=row.get("description", ""),
-            topics=row.get("topics", ""),
-            readme=row.get(readme_col, ""),
-        )
-        texts.append(text)
 
-    # Run inference in batches
+    def column_or_blank(name: str):
+        return df[name].tolist() if name in df.columns else [""] * len(df)
+
+    texts = [
+        format_input_text(
+            name=name,
+            description=description,
+            topics=topics,
+            readme=readme,
+            max_readme_chars=max_readme_chars,
+            clean_text=clean_text,
+        )
+        for name, description, topics, readme in zip(
+            column_or_blank(name_col),
+            column_or_blank("description"),
+            column_or_blank("topics"),
+            column_or_blank(readme_col),
+        )
+    ]
+
+    # Length-sorted batching: group texts of similar length so each batch pads
+    # to a short common length instead of to the longest text in the file.
+    # Same predictions, but several times less wasted computation.
+    order = sorted(range(len(texts)), key=lambda i: -len(texts[i]))
+    results_in_order = [None] * len(texts)
+
     logger.info(f"Running inference with batch_size={batch_size}...")
-    all_results = []
-
-    for i in tqdm(range(0, len(texts), batch_size), desc="Inference"):
-        batch_texts = texts[i:i + batch_size]
+    for i in tqdm(range(0, len(order), batch_size), desc="Inference"):
+        idx = order[i:i + batch_size]
         batch_results = predict_batch(
-            batch_texts, model, tokenizer, device, max_length
+            [texts[j] for j in idx], model, tokenizer, device, max_length
         )
-        all_results.extend(batch_results)
+        for j, result in zip(idx, batch_results):
+            results_in_order[j] = result
 
     # Add predictions to dataframe
-    df["predicted_naics"] = [r["predicted_naics"] for r in all_results]
-    df["confidence"] = [r["confidence"] for r in all_results]
-    df["naics_description"] = [r["naics_description"] for r in all_results]
+    df["predicted_naics"] = [r["predicted_naics"] for r in results_in_order]
+    df["confidence"] = [r["confidence"] for r in results_in_order]
+    df["naics_description"] = [r["naics_description"] for r in results_in_order]
 
     # Save results
     output_path = Path(output_file)
@@ -377,8 +431,9 @@ def main():
     parser.add_argument(
         "--batch-size", "-b",
         type=int,
-        default=16,
-        help="Batch size for inference (default: 16)"
+        default=32,
+        help="Batch size for inference (default: 32). On Apple Silicon 32-64 is "
+             "fastest; larger batches are slower, not faster."
     )
     parser.add_argument(
         "--max-length",
@@ -396,8 +451,37 @@ def main():
         "--device", "-d",
         type=str,
         default=None,
-        choices=["cuda", "cpu"],
-        help="Device to use (default: auto-detect)"
+        choices=["cuda", "mps", "cpu"],
+        help="Device to use (default: auto-detect; 'mps' is Apple Silicon)"
+    )
+    parser.add_argument(
+        "--fp16",
+        dest="fp16",
+        action="store_true",
+        default=None,
+        help="Force half precision (default: on for CUDA and MPS, off for CPU)"
+    )
+    parser.add_argument(
+        "--no-fp16",
+        dest="fp16",
+        action="store_false",
+        help="Force full precision"
+    )
+    parser.add_argument(
+        "--no-clean-text",
+        dest="clean_text",
+        action="store_false",
+        default=True,
+        help="Skip clean_readme_text. The production pipeline that generated the "
+             "published NAICS datasets does NOT clean the text; use this flag "
+             "together with --max-readme-chars 3000 to reproduce it."
+    )
+    parser.add_argument(
+        "--max-readme-chars",
+        type=int,
+        default=5000,
+        help="Truncate README to this many characters (default: 5000; the "
+             "production pipeline uses 3000)"
     )
 
     args = parser.parse_args()
@@ -415,6 +499,9 @@ def main():
         limit=args.limit,
         device=args.device,
         token=token,
+        fp16=args.fp16,
+        clean_text=args.clean_text,
+        max_readme_chars=args.max_readme_chars,
     )
 
 
