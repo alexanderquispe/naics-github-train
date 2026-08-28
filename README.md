@@ -198,6 +198,28 @@ uniformly over the 19 classes and any numerical noise flips the argmax.
 Batch size 32-64 is the sweet spot on Apple Silicon; larger batches are *slower*,
 not faster. Peak memory was 6.5 GB.
 
+### Large or repeated runs
+
+`from_pretrained` revalidates the cached files against the Hub on every call, so
+each run makes ~16 HTTP requests even when the model is already on disk. Over a
+job split into chunks that adds up, and it inflates the model's download counter
+on the Hub. Download once, then run offline:
+
+```bash
+# first run: downloads and caches the model
+python scripts/inference_batch.py -i data.parquet -o out.parquet --limit 1
+
+# subsequent runs: no Hub requests at all
+python scripts/inference_batch.py -i data.parquet -o out.parquet --local-files-only
+```
+
+`HF_HUB_OFFLINE=1` has the same effect for any script that loads the model.
+
+Memory is not usually the constraint: on an M5 Max, fp16 with batch 64 peaks at
+3.2 GB. If you do hit an out-of-memory error on the GPU, the cause is almost
+always untruncated README text — cap it with `--max-readme-chars` rather than
+shrinking the batch.
+
 ### Reproducing the published NAICS datasets
 
 The production pipeline that generated the published datasets does **not** apply

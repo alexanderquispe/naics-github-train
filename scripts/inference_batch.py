@@ -201,6 +201,7 @@ def load_model(
     device: Optional[str] = None,
     token: Optional[str] = None,
     fp16: Optional[bool] = None,
+    local_files_only: bool = False,
 ):
     """
     Load the model and tokenizer from Hugging Face.
@@ -210,6 +211,10 @@ def load_model(
         device: Device to use ('cuda', 'mps', 'cpu', or None for auto)
         token: Hugging Face token for private models
         fp16: Force half precision on/off (None = auto per device)
+        local_files_only: Load from the local cache without contacting the Hub.
+            from_pretrained revalidates the cached files against the Hub on every
+            call, which costs ~16 HTTP requests per run even when nothing needs
+            downloading. Set this once the model is cached.
 
     Returns:
         Tuple of (model, tokenizer, device)
@@ -220,9 +225,11 @@ def load_model(
     dtype = resolve_dtype(device, fp16)
     logger.info(f"Using device: {device} ({str(dtype).replace('torch.', '')})")
 
-    tokenizer = AutoTokenizer.from_pretrained(model_name, token=token)
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_name, token=token, local_files_only=local_files_only
+    )
     model = AutoModelForSequenceClassification.from_pretrained(
-        model_name, token=token, dtype=dtype
+        model_name, token=token, dtype=dtype, local_files_only=local_files_only
     )
     model = model.to(device)
     model.eval()
@@ -297,6 +304,7 @@ def run_inference(
     fp16: Optional[bool] = None,
     clean_text: bool = True,
     max_readme_chars: int = 5000,
+    local_files_only: bool = False,
 ):
     """
     Run batch inference on a parquet file.
@@ -328,7 +336,9 @@ def run_inference(
     logger.info(f"Using columns: name={name_col}, readme={readme_col}")
 
     # Load model
-    model, tokenizer, device = load_model(model_name, device, token, fp16)
+    model, tokenizer, device = load_model(
+        model_name, device, token, fp16, local_files_only
+    )
 
     # Prepare input texts. Zipping the columns is an order of magnitude faster
     # than iterrows, which matters at hundreds of thousands of rows.
@@ -468,6 +478,15 @@ def main():
         help="Force full precision"
     )
     parser.add_argument(
+        "--local-files-only",
+        action="store_true",
+        help="Load the model from the local cache without contacting the Hub. "
+             "from_pretrained revalidates against the Hub on every call (~16 HTTP "
+             "requests per run) even when the model is already cached, which also "
+             "inflates the model's download counter. Use this for repeated or "
+             "chunked runs once the model has been downloaded once."
+    )
+    parser.add_argument(
         "--no-clean-text",
         dest="clean_text",
         action="store_false",
@@ -502,6 +521,7 @@ def main():
         fp16=args.fp16,
         clean_text=args.clean_text,
         max_readme_chars=args.max_readme_chars,
+        local_files_only=args.local_files_only,
     )
 
 
