@@ -81,7 +81,7 @@ from transformers import pipeline
 
 classifier = pipeline(
     "text-classification",
-    model="alexanderquispe/naics-github-classifier"
+    model="aquiro1994/naics-github-classifier"
 )
 
 text = "Repository: bank-api | Description: REST API for banking transactions | README: A secure API for financial operations"
@@ -96,8 +96,8 @@ print(result)
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 import torch
 
-model = AutoModelForSequenceClassification.from_pretrained("alexanderquispe/naics-github-classifier")
-tokenizer = AutoTokenizer.from_pretrained("alexanderquispe/naics-github-classifier")
+model = AutoModelForSequenceClassification.from_pretrained("aquiro1994/naics-github-classifier")
+tokenizer = AutoTokenizer.from_pretrained("aquiro1994/naics-github-classifier")
 
 # Format input
 text = "Repository: mediscan | Description: AI diagnostic tool for radiology | Topics: healthcare; medical-imaging; deep-learning | README: MediScan uses computer vision to assist radiologists..."
@@ -207,7 +207,7 @@ python scripts/train.py \
   title = {NAICS GitHub Repository Classifier},
   year = {2025},
   publisher = {Hugging Face},
-  url = {https://huggingface.co/alexanderquispe/naics-github-classifier}
+  url = {https://huggingface.co/aquiro1994/naics-github-classifier}
 }
 ```
 

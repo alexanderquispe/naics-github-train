@@ -8,7 +8,7 @@ Fine-tuning transformer models to classify GitHub repositories into NAICS (North
 |-------|---------|---------------|---------------|
 | **RoBERTa-large** | **86.33%** | **86.72%** | ~8 min (A100) |
 
-**Pre-trained model available:** [huggingface.co/alexanderquispe/naics-github-classifier](https://huggingface.co/alexanderquispe/naics-github-classifier)
+**Pre-trained model available:** [huggingface.co/aquiro1994/naics-github-classifier](https://huggingface.co/aquiro1994/naics-github-classifier)
 
 ## Quick Start
 
@@ -19,7 +19,7 @@ from transformers import pipeline
 
 classifier = pipeline(
     "text-classification",
-    model="alexanderquispe/naics-github-classifier"
+    model="aquiro1994/naics-github-classifier"
 )
 
 text = "Repository: bank-api | Description: REST API for banking transactions | README: Secure financial API"
@@ -138,8 +138,8 @@ Available models:
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 import torch
 
-model = AutoModelForSequenceClassification.from_pretrained("alexanderquispe/naics-github-classifier")
-tokenizer = AutoTokenizer.from_pretrained("alexanderquispe/naics-github-classifier")
+model = AutoModelForSequenceClassification.from_pretrained("aquiro1994/naics-github-classifier")
+tokenizer = AutoTokenizer.from_pretrained("aquiro1994/naics-github-classifier")
 
 text = "Repository: mediscan | Description: AI diagnostic tool for radiology | README: Medical imaging analysis..."
 
@@ -170,6 +170,50 @@ python scripts/inference_batch.py \
 ```
 
 The input parquet should have columns: `name` (or `name_repo`), `description`, `topics`, `readme` (or `readme_content`).
+
+### Hardware
+
+The device is auto-detected in this order: CUDA, then MPS (Apple Silicon), then CPU.
+Half precision is enabled by default on CUDA and MPS. Override either one if needed:
+
+```bash
+python scripts/inference_batch.py -i data.parquet -o out.parquet --device mps
+python scripts/inference_batch.py -i data.parquet -o out.parquet --no-fp16
+```
+
+Throughput on an Apple M5 Max (RoBERTa-large, batch 32, 512 tokens):
+
+| Device | Precision | rows/s |
+|--------|-----------|-------:|
+| CPU | fp32 | 4.3 |
+| MPS | fp32 | 47.5 |
+| **MPS** | **fp16** | **177** |
+
+fp16 does not change the predictions this model is used for: on a 2,000-repo
+sample, labels above the `0.8` confidence threshold matched fp32 **100%** of the
+time. Disagreements only appear below `score < 0.4`, on inputs such as
+`Repository: ajax | README: \n`, where the model spreads probability almost
+uniformly over the 19 classes and any numerical noise flips the argmax.
+
+Batch size 32-64 is the sweet spot on Apple Silicon; larger batches are *slower*,
+not faster. Peak memory was 6.5 GB.
+
+### Reproducing the published NAICS datasets
+
+The production pipeline that generated the published datasets does **not** apply
+`clean_readme_text`, and truncates the README to 3,000 characters rather than
+5,000. The defaults here keep the historical behaviour; to reproduce production
+output exactly, pass:
+
+```bash
+python scripts/inference_batch.py \
+    -i data.parquet -o out.parquet \
+    --no-clean-text --max-readme-chars 3000
+```
+
+Measured against the published predictions on a 400-repo sample, restricted to
+the `score >= 0.8` rows that the analysis actually keeps: **100.00%** label
+agreement with these flags, **97.35%** with the defaults.
 
 ### Industry Adoption Visualization
 
@@ -261,7 +305,7 @@ python scripts/train.py --model roberta-large --batch-size 4
   title = {NAICS GitHub Repository Classifier},
   year = {2025},
   publisher = {Hugging Face},
-  url = {https://huggingface.co/alexanderquispe/naics-github-classifier}
+  url = {https://huggingface.co/aquiro1994/naics-github-classifier}
 }
 ```
 
