@@ -7,6 +7,7 @@ and making predictions on new data.
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 
@@ -20,6 +21,17 @@ from transformers import (
 from .text_format import format_model_input
 
 logger = logging.getLogger(__name__)
+
+
+def resolve_device(device: Optional[str] = None) -> str:
+    """CUDA, then Apple Silicon, then CPU. Same order as scripts/inference_batch.py."""
+    if device:
+        return device
+    if torch.cuda.is_available():
+        return "cuda"
+    if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
 
 
 def load_trained_model(
@@ -36,14 +48,22 @@ def load_trained_model(
     Returns:
         Tuple of (model, tokenizer, label_mappings)
     """
-    model_path = Path(model_path)
+    # A Hugging Face id such as "aquiro1994/naics-github-classifier" is not a
+    # path and must reach from_pretrained untouched. Anything that exists on
+    # disk is local; anything else is accepted only if it has the shape of a
+    # Hub id, so a mistyped directory still fails loudly.
+    local = Path(model_path).expanduser()
+    if local.exists():
+        model_path = local
+    elif re.fullmatch(r"[\w.-]+/[\w.-]+", str(model_path)):
+        model_path = str(model_path)          # Hub id, let from_pretrained resolve it
+    else:
+        raise FileNotFoundError(
+            f"Model not found at {model_path}. Give a local directory that "
+            f"exists, or a Hugging Face id such as 'org/model-name'."
+        )
 
-    if not model_path.exists():
-        raise FileNotFoundError(f"Model not found at {model_path}")
-
-    # Determine device
-    if device is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = resolve_device(device)
 
     logger.info(f"Loading model from {model_path}")
     logger.info(f"Using device: {device}")
@@ -58,8 +78,10 @@ def load_trained_model(
 
     # Load label mappings if available
     label_mappings = None
-    mappings_path = model_path / "label_mappings.json"
-    if mappings_path.exists():
+    # Only a local directory carries label_mappings.json; for a Hub id the
+    # mapping comes from the model config, which from_pretrained already read.
+    mappings_path = Path(model_path) / "label_mappings.json" if isinstance(model_path, Path) else None
+    if mappings_path is not None and mappings_path.exists():
         with open(mappings_path, "r") as f:
             label_mappings = json.load(f)
         logger.info(f"Loaded label mappings with {len(label_mappings['label2id'])} labels")
@@ -76,27 +98,34 @@ def load_trained_model(
 
 def create_classifier_pipeline(
     model_path: Union[str, Path],
-    device: Optional[int] = None,
+    device: Optional[str] = None,
+    max_length: int = 512,
 ) -> pipeline:
     """
     Create a Hugging Face pipeline for text classification.
 
     Args:
-        model_path: Path to the saved model
-        device: Device index (-1 for CPU, 0+ for GPU)
+        model_path: Path to the saved model, or a Hugging Face model id
+        device: "cuda", "mps" or "cpu"; auto-detected in that order when None
+        max_length: Tokens to keep. Inputs are truncated to this length, which
+            the model's positional limit requires
 
     Returns:
         Text classification pipeline
     """
     if device is None:
-        device = 0 if torch.cuda.is_available() else -1
+        device = resolve_device()
 
     logger.info(f"Creating classifier pipeline from {model_path}")
 
+    # truncation and max_length are required: without them any input over the
+    # model's positional limit raises "index 514 is out of bounds".
     classifier = pipeline(
         task="text-classification",
         model=str(model_path),
         device=device,
+        truncation=True,
+        max_length=max_length,
     )
 
     return classifier

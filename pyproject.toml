@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "naics-github-train"
+version = "1.1.0"
+description = "Fine-tune transformer models to classify GitHub repositories into NAICS industry sectors"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+authors = [{ name = "Alexander Quispe" }]
+keywords = ["naics", "text-classification", "github", "transformers"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "torch>=2.0.0",
+    # transformers 5 removed TrainingArguments(warmup_ratio=...); src/trainer.py
+    # handles both majors, but the pin documents what the published model used.
+    "transformers>=4.36.0",
+    "accelerate>=1.2.1",
+    "datasets>=3.1.0",
+    "pandas>=2.0.0",
+    "numpy>=1.26.0",
+    "scikit-learn>=1.3.0",
+    "matplotlib>=3.7.0",
+    "seaborn>=0.12.0",
+    "pyyaml>=6.0",
+    "pyarrow>=14.0.0",
+    "tqdm>=4.66.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[project.urls]
+Homepage = "https://github.com/alexanderquispe/naics-github-train"
+Model = "https://huggingface.co/aquiro1994/naics-github-classifier"
+
+[tool.setuptools]
+packages = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

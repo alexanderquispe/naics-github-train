@@ -224,6 +224,8 @@ def run_inference(
     fp16: Optional[bool] = None,
     clean_text: bool = True,
     max_readme_chars: Optional[int] = None,
+    name_column: Optional[str] = None,
+    readme_column: Optional[str] = None,
     local_files_only: bool = False,
 ):
     """
@@ -249,11 +251,38 @@ def run_inference(
 
     logger.info(f"Total rows: {len(df)}")
 
-    # Detect column names
-    name_col = "name" if "name" in df.columns else "name_repo"
-    readme_col = "readme" if "readme" in df.columns else "readme_content"
+    # Resolve the columns against what is actually in the file. Falling back to
+    # a name that is also absent used to leave every field blank and still write
+    # a complete-looking output file.
+    def resolve(candidates, override=None, required=False, what=""):
+        if override:
+            if override not in df.columns:
+                raise SystemExit(
+                    f"Column {override!r} not found. Columns present: {list(df.columns)}"
+                )
+            return override
+        for candidate in candidates:
+            if candidate in df.columns:
+                return candidate
+        if required:
+            raise SystemExit(
+                f"No {what} column found. Tried {candidates}; columns present: "
+                f"{list(df.columns)}. Pass --name-column / --readme-column to override."
+            )
+        return None
 
-    logger.info(f"Using columns: name={name_col}, readme={readme_col}")
+    name_col = resolve(["name", "name_repo", "repo", "nwo", "repo_name"], name_column, what="repository name")
+    readme_col = resolve(["readme", "readme_content", "readme_text"], readme_column, what="README")
+    desc_col = resolve(["description", "desc"])
+    topics_col = resolve(["topics", "topic"])
+    if name_col is None and readme_col is None:
+        raise SystemExit(
+            "Neither a repository-name nor a README column was found. Columns "
+            f"present: {list(df.columns)}. Pass --name-column / --readme-column."
+        )
+
+    logger.info(f"Using columns: name={name_col}, description={desc_col}, "
+                f"topics={topics_col}, readme={readme_col}")
 
     # Load model
     model, tokenizer, device = load_model(
@@ -264,8 +293,8 @@ def run_inference(
     # than iterrows, which matters at hundreds of thousands of rows.
     logger.info("Formatting input texts...")
 
-    def column_or_blank(name: str):
-        return df[name].tolist() if name in df.columns else [""] * len(df)
+    def column_or_blank(name):
+        return df[name].tolist() if name else [""] * len(df)
 
     texts = [
         format_input_text(
@@ -278,8 +307,8 @@ def run_inference(
         )
         for name, description, topics, readme in zip(
             column_or_blank(name_col),
-            column_or_blank("description"),
-            column_or_blank("topics"),
+            column_or_blank(desc_col),
+            column_or_blank(topics_col),
             column_or_blank(readme_col),
         )
     ]
@@ -416,6 +445,18 @@ def main():
              "together with --max-readme-chars 3000 to reproduce it."
     )
     parser.add_argument(
+        "--name-column",
+        type=str,
+        default=None,
+        help="Column holding the repository name. Auto-detected when omitted.",
+    )
+    parser.add_argument(
+        "--readme-column",
+        type=str,
+        default=None,
+        help="Column holding the README. Auto-detected when omitted.",
+    )
+    parser.add_argument(
         "--max-readme-chars",
         type=int,
         default=None,
@@ -441,6 +482,8 @@ def main():
         token=token,
         fp16=args.fp16,
         clean_text=args.clean_text,
+        name_column=args.name_column,
+        readme_column=args.readme_column,
         max_readme_chars=args.max_readme_chars,
         local_files_only=args.local_files_only,
     )

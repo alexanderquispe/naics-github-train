@@ -205,6 +205,9 @@ def plot_class_performance(
 
     # Sort by value
     sorted_pairs = sorted(zip(values, classes), reverse=True)
+    if not sorted_pairs:
+        logger.warning("No per-class rows in the classification report; nothing to plot")
+        return None
     values, classes = zip(*sorted_pairs)
 
     plt.figure(figsize=figsize)
@@ -268,7 +271,7 @@ def plot_text_length_distribution(
     plt.legend()
 
     plt.subplot(1, 2, 2)
-    plt.boxplot(lengths, vert=True)
+    plt.boxplot(lengths)  # vert= was removed in matplotlib 3.13
     plt.ylabel("Text Length (characters)")
     plt.title("Box Plot")
 

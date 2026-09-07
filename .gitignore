@@ -1,5 +1,7 @@
-# Data files (too large for git)
-data/raw/*.parquet
+# Intermediate artifacts. The two training parquets under data/raw/ are tracked
+# on purpose -- they are the input every documented number comes from -- so they
+# are not ignored here; anything else added to data/raw/ is.
+data/raw/*.csv
 data/processed/
 
 # Model checkpoints

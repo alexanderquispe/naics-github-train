@@ -37,14 +37,19 @@ def compute_metrics(eval_pred: Tuple[np.ndarray, np.ndarray]) -> Dict[str, float
     predictions = np.argmax(predictions, axis=1)
 
     # Calculate metrics
-    f1 = f1_score(labels, predictions, average="weighted")
+    f1 = f1_score(labels, predictions, average="weighted", zero_division=0)
+    f1_macro = f1_score(labels, predictions, average="macro", zero_division=0)
     accuracy = accuracy_score(labels, predictions)
     precision, recall, _, _ = precision_recall_fscore_support(
-        labels, predictions, average="weighted"
+        labels, predictions, average="weighted", zero_division=0
     )
 
+    # f1_macro is reported alongside the weighted score because the classes are
+    # imbalanced 8:1 and a sector the model never predicts is invisible in the
+    # weighted number.
     return {
         "f1": float(f1),
+        "f1_macro": float(f1_macro),
         "accuracy": float(accuracy),
         "precision": float(precision),
         "recall": float(recall),
@@ -68,7 +73,7 @@ def compute_detailed_metrics(
         Dictionary with detailed metrics
     """
     precision, recall, f1, _ = precision_recall_fscore_support(
-        y_true, y_pred, average=average
+        y_true, y_pred, average=average, zero_division=0
     )
     accuracy = accuracy_score(y_true, y_pred)
 
@@ -98,15 +103,20 @@ def generate_classification_report(
     Returns:
         Classification report as string or dict
     """
-    target_names = None
+    target_names, labels = None, None
     if id2label:
-        # Create sorted list of label names
-        sorted_labels = sorted(id2label.keys())
-        target_names = [str(id2label[i]) for i in sorted_labels]
+        # Sort by integer id, not lexicographically: after a JSON round trip the
+        # keys are strings, and sorted() would give 0, 1, 10, 11, ... 2, 3, so
+        # every row from id 2 onwards would carry another sector's name.
+        labels = sorted(int(k) for k in id2label)
+        target_names = [str(id2label.get(i, id2label.get(str(i)))) for i in labels]
 
+    # labels= is required: without it sklearn infers the classes present in the
+    # data, and any sector absent from a slice makes the lengths disagree.
     report = classification_report(
         y_true,
         y_pred,
+        labels=labels,
         target_names=target_names,
         output_dict=output_dict,
         zero_division=0,

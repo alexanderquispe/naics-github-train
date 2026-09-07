@@ -42,7 +42,7 @@ def decode_description(value) -> str:
     Idempotent and forgiving: anything that is not such a repr is returned
     unchanged.
     """
-    if value is None or (isinstance(value, float) and pd.isna(value)):
+    if _is_null(value):
         return ""
     text = str(value)
     if not (text.startswith("b'") or text.startswith('b"')):
@@ -69,8 +69,8 @@ def clean_topics(topic_str) -> str:
     Returns:
         Cleaned topics string with semicolon separation
     """
-    # Handle None/NaN values
-    if topic_str is None or (isinstance(topic_str, float) and pd.isna(topic_str)):
+    # Handle None/NaN/NA values
+    if _is_null(topic_str):
         return ""
 
     # Handle arrays/lists
@@ -94,8 +94,15 @@ def clean_topics(topic_str) -> str:
                 except (ValueError, SyntaxError):
                     pass
 
-            # Clean string format
-            return topic_str.replace("[", "").replace("]", "").replace(",", ";").strip()
+            # Clean string format. Commas become separators only when the
+            # string does not already use semicolons, so running this over its
+            # own output is a no-op -- otherwise a topic containing a comma
+            # ("deep, learning") is split on the second pass and training and
+            # inference disagree.
+            cleaned = topic_str.replace("[", "").replace("]", "").strip()
+            if ";" not in cleaned:
+                cleaned = cleaned.replace(",", ";")
+            return cleaned
 
         # Convert other types to string
         return str(topic_str)
@@ -111,13 +118,34 @@ def clean_readme_text(text: str) -> str:
     This is the cleaning applied during training, and -- since version 1.1 --
     at inference as well.
 
+    DO NOT "FIX" THE TWO RULES BELOW. Both behave differently from what a
+    reader expects, and the published checkpoint was fine-tuned on their output,
+    so changing either one silently invalidates the model.
+
+    1. The installation-noise rule at the end deletes everything after the first
+       `pip install` / `npm install` / `git clone`, not just that line: by then
+       whitespace has been normalised, so `(\n|$)` can only match end of string
+       and the lazy `.*?` swallows the remainder. On raw READMEs that costs 12.7%
+       of repositories more than half their text. The published training file was
+       built with the same truncation -- measured over the 1,077 training
+       repositories whose raw README contains an install command, the median goes
+       4,072 -> 1,445 characters and 0.0% of install commands survive, while this
+       function gives 1,477 -- so the model expects it.
+
+    2. The code-block rules never fire. The `[*_~`]{1,2}` substitution above
+       strips every backtick first, so the fence patterns cannot match. Code
+       block bodies therefore reach the model; only the fences are removed.
+
+    tests/test_text_format.py pins the current output. If you change this
+    function, retrain and republish the model, and update that test deliberately.
+
     Args:
         text: Raw README content
 
     Returns:
         Cleaned text string
     """
-    if not text or pd.isna(text):
+    if _is_null(text) or not text:
         return ""
 
     text = str(text)
@@ -168,14 +196,29 @@ def clean_readme_text(text: str) -> str:
     return text.strip()
 
 
-def _present(value) -> bool:
-    """A field is present when it is not null and not the string 'nan'."""
+def _is_null(value) -> bool:
+    """True for None, float NaN and pandas' nullable/Arrow NA.
+
+    `isinstance(value, float) and pd.isna(value)` is not enough: pd.NA is NAType,
+    so it survives the test and reaches the model as the literal string "<NA>".
+    pd.isna raises on arrays, hence the scalar guard.
+    """
     if value is None:
+        return True
+    if isinstance(value, (list, tuple, np.ndarray)):
         return False
-    if isinstance(value, float) and pd.isna(value):
+    try:
+        return bool(pd.isna(value))
+    except (TypeError, ValueError):
+        return False
+
+
+def _present(value) -> bool:
+    """A field is present when it is not null and not a null-ish string."""
+    if _is_null(value):
         return False
     text = str(value).strip()
-    return bool(text) and text != "nan"
+    return bool(text) and text not in {"nan", "<NA>", "None", "NaT"}
 
 
 def format_model_input(

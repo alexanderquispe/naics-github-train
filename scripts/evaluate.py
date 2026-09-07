@@ -65,7 +65,7 @@ def parse_args():
     parser.add_argument(
         "--test-data",
         type=str,
-        default=str(RAW_DATA_DIR / "train_data_gpt_ab8score.parquet"),
+        default=str(RAW_DATA_DIR / "train_data_gpt_ab8_score_with_code.parquet"),
         help="Path to test data (parquet file)",
     )
     parser.add_argument(
@@ -84,7 +84,34 @@ def parse_args():
         "--max-seq-length",
         type=int,
         default=2048,
-        help="Maximum sequence length",
+        help="Maximum sequence length. Clamped to 512 for every model except "
+             "ModernBERT, as scripts/train.py does.",
+    )
+    parser.add_argument(
+        "--min-samples",
+        type=int,
+        default=80,
+        help="Minimum samples per class. MUST match the value used for "
+             "training: a different value changes the label ids and reshuffles "
+             "the stratified split, which leaks training rows into the test set.",
+    )
+    parser.add_argument(
+        "--test-size",
+        type=float,
+        default=0.2,
+        help="Proportion for the test set. Must match training.",
+    )
+    parser.add_argument(
+        "--val-size",
+        type=float,
+        default=0.1,
+        help="Proportion for the validation set. Must match training.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Split seed. Must match training.",
     )
     parser.add_argument(
         "--output-report",
@@ -158,11 +185,9 @@ def main():
     logger.info("NAICS GitHub Repository Classifier - Evaluation")
     logger.info("=" * 60)
 
-    # Check model path
-    model_path = Path(args.model)
-    if not model_path.exists():
-        logger.error(f"Model not found: {model_path}")
-        sys.exit(1)
+    # A local directory or a Hugging Face id; load_trained_model validates both.
+    model_path = args.model
+
 
     logger.info(f"Model: {model_path}")
     logger.info(f"Test data: {args.test_data}")
@@ -197,10 +222,22 @@ def main():
     logger.info(f"Loaded {len(raw_data)} examples")
 
     # Prepare dataset
+    # min_samples_per_class must match training. Without it the label space and
+    # the split both change, and rows the model trained on land in the test set.
     processed_df, data_label2id, data_id2label = prepare_naics_dataset(
         raw_data,
         target_column=args.target_column,
+        min_samples_per_class=args.min_samples,
     )
+
+    if id2label and data_id2label and dict(data_id2label) != {int(k): v for k, v in id2label.items()}:
+        logger.warning(
+            "The label mapping rebuilt from the data does not match the model's. "
+            "This usually means --min-samples, --test-size, --val-size or --seed "
+            "differ from the values used for training; the scores below would be "
+            "meaningless. Model: %s ... Data: %s ...",
+            list(id2label.items())[:3], list(data_id2label.items())[:3],
+        )
 
     # Use data labels if model labels not available
     if not id2label:
@@ -210,15 +247,26 @@ def main():
     # Create test split
     dataset_dict = create_dataset_splits(
         processed_df,
-        test_size=0.2,
-        val_size=0.1,
+        test_size=args.test_size,
+        val_size=args.val_size,
+        seed=args.seed,
     )
 
-    # Tokenize
+    # Clamp to the model's positional limit, as scripts/train.py does; without
+    # this a 512-token model dies on the first long example.
+    max_seq_length = args.max_seq_length
+    model_limit = getattr(model.config, "max_position_embeddings", None)
+    if model_limit:
+        # RoBERTa reserves two positions (pad + offset), hence the margin
+        usable = model_limit - 2 if model_limit <= 1024 else model_limit
+        if max_seq_length > usable:
+            logger.info(f"Clamping max_seq_length {max_seq_length} -> {min(usable, 512) if usable < 2048 else usable}")
+            max_seq_length = min(max_seq_length, usable)
+
     tokenized_dataset = tokenize_dataset(
         dataset_dict,
         tokenizer,
-        max_length=args.max_seq_length,
+        max_length=max_seq_length,
     )
 
     test_dataset = tokenized_dataset["test"]

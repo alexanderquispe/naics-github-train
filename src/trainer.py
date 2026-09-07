@@ -5,7 +5,9 @@ This module provides functions for setting up and training
 transformer models for NAICS classification.
 """
 
+import inspect
 import logging
+import math
 from pathlib import Path
 from typing import Dict, Optional, Tuple, Any
 
@@ -22,6 +24,46 @@ from transformers import (
 from .metrics import compute_metrics
 
 logger = logging.getLogger(__name__)
+
+# transformers 5 removed TrainingArguments(warmup_ratio=...) in favour of an
+# absolute warmup_steps. Detect it once so this package works on both majors.
+_ACCEPTS_WARMUP_RATIO = "warmup_ratio" in inspect.signature(TrainingArguments.__init__).parameters
+
+
+def resolve_warmup(
+    warmup_ratio: float,
+    num_training_steps: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Return the warm-up keyword this installation of transformers understands.
+
+    On transformers 4.x that is `warmup_ratio` and the ratio is passed through.
+    On 5.x only `warmup_steps` exists, so the ratio has to be turned into a
+    count, which needs the total number of optimizer steps; callers that know
+    their dataset size should pass it. Without it the schedule cannot be
+    reproduced, so this raises rather than silently training without warm-up.
+    """
+    if _ACCEPTS_WARMUP_RATIO:
+        return {"warmup_ratio": warmup_ratio}
+    if not warmup_ratio:
+        return {"warmup_steps": 0}
+    if num_training_steps is None:
+        raise ValueError(
+            "transformers >= 5 removed warmup_ratio, so the warm-up has to be given "
+            "in optimizer steps. Pass num_training_steps=... to get_training_args "
+            "(scripts/train.py computes it), or set warmup_ratio=0."
+        )
+    return {"warmup_steps": math.ceil(warmup_ratio * num_training_steps)}
+
+
+def count_training_steps(
+    num_examples: int,
+    batch_size: int,
+    gradient_accumulation_steps: int,
+    num_epochs: int,
+) -> int:
+    """Optimizer steps a run will take, the way the HF Trainer counts them."""
+    per_epoch = math.ceil(num_examples / (batch_size * gradient_accumulation_steps))
+    return per_epoch * num_epochs
 
 
 def setup_model(
@@ -91,6 +133,7 @@ def get_training_args(
     use_bf16: bool = True,
     use_fused_optimizer: bool = True,
     seed: int = 42,
+    num_training_steps: Optional[int] = None,
     **kwargs,
 ) -> TrainingArguments:
     """
@@ -113,6 +156,8 @@ def get_training_args(
         use_bf16: Whether to use bfloat16 precision
         use_fused_optimizer: Whether to use fused AdamW optimizer
         seed: Random seed
+        num_training_steps: Total optimizer steps, used to convert warmup_ratio
+            into warmup_steps on transformers >= 5. See resolve_warmup.
         **kwargs: Additional TrainingArguments parameters
 
     Returns:
@@ -135,7 +180,7 @@ def get_training_args(
         per_device_eval_batch_size=eval_batch_size,
         learning_rate=learning_rate,
         weight_decay=weight_decay,
-        warmup_ratio=warmup_ratio,
+        **resolve_warmup(warmup_ratio, num_training_steps),
         lr_scheduler_type=lr_scheduler_type,
         # Optimization
         gradient_accumulation_steps=gradient_accumulation_steps,
@@ -166,6 +211,7 @@ def get_training_args(
     logger.info(f"  Epochs: {num_epochs}")
     logger.info(f"  Batch size: {batch_size}")
     logger.info(f"  Learning rate: {learning_rate}")
+    logger.info(f"  Warm-up: {resolve_warmup(warmup_ratio, num_training_steps)}")
     logger.info(f"  BF16: {bf16}")
 
     return training_args
@@ -221,12 +267,15 @@ def train_model(
     # Get callbacks
     callbacks = get_callbacks(early_stopping_patience, early_stopping_threshold)
 
-    # Create trainer
+    # Create trainer. Passing the tokenizer gives DataCollatorWithPadding instead
+    # of default_data_collator, which cannot batch sequences of different lengths,
+    # and makes the checkpoints self-contained.
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=tokenized_dataset["train"],
         eval_dataset=tokenized_dataset["validation"],
+        processing_class=tokenizer,
         compute_metrics=compute_metrics,
         callbacks=callbacks,
     )

@@ -34,7 +34,7 @@ print(result)
 # Clone and install
 git clone https://github.com/alexanderquispe/naics-github-train.git
 cd naics-github-train
-pip install -r requirements.txt
+pip install -e .          # or: pip install -r requirements.txt
 
 # Train RoBERTa-large (~8 min on A100)
 python scripts/train.py \
@@ -93,11 +93,14 @@ naics-github-train/
 │   └── raw/
 │       └── train_data_gpt_ab8_score_with_code.parquet
 ├── src/
+│   ├── text_format.py           # The single input builder: training + inference
 │   ├── data_loader.py           # Data loading & preprocessing
 │   ├── trainer.py               # Model training pipeline
 │   ├── inference.py             # Prediction functions
 │   ├── naics_mapping.py         # NAICS code mappings
 │   └── metrics.py               # Evaluation metrics
+├── tests/
+│   └── test_text_format.py      # Pins the training/inference input contract
 ├── scripts/
 │   ├── train.py                 # CLI training script
 │   ├── evaluate.py              # Evaluation script
@@ -115,13 +118,16 @@ naics-github-train/
 
 ```bash
 # RoBERTa-large (best performance)
-python scripts/train.py --model roberta-large --batch-size 32 --epochs 8
+python scripts/train.py --model roberta-large --batch-size 32 --epochs 8 \
+    --data data/raw/train_data_gpt_ab8_score_with_code.parquet
 
 # RoBERTa-base (faster training)
-python scripts/train.py --model roberta-base --batch-size 16 --epochs 8
+python scripts/train.py --model roberta-base --batch-size 16 --epochs 8 \
+    --data data/raw/train_data_gpt_ab8_score_with_code.parquet
 
 # With gradient checkpointing (for limited GPU memory)
-python scripts/train.py --model roberta-large --batch-size 8 --gradient-checkpointing
+python scripts/train.py --model roberta-large --batch-size 8 --gradient-checkpointing \
+    --data data/raw/train_data_gpt_ab8_score_with_code.parquet
 ```
 
 Available models:
@@ -358,7 +364,8 @@ Training data should be a parquet file with these columns:
 
 ```bash
 # Use gradient checkpointing
-python scripts/train.py --model roberta-large --batch-size 8 --gradient-checkpointing
+python scripts/train.py --model roberta-large --batch-size 8 --gradient-checkpointing \
+    --data data/raw/train_data_gpt_ab8_score_with_code.parquet
 
 # Or reduce batch size
 python scripts/train.py --model roberta-large --batch-size 4

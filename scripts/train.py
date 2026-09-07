@@ -40,8 +40,10 @@ from src.trainer import (
     train_model,
     evaluate_model,
     save_model,
+    count_training_steps,
 )
 from src.visualization import plot_label_distribution
+from transformers import set_seed
 
 # Setup logging
 logging.basicConfig(
@@ -147,6 +149,19 @@ def parse_args():
         help="Early stopping patience (evaluations)",
     )
     parser.add_argument(
+        "--gradient-accumulation-steps",
+        type=int,
+        default=2,
+        help="Micro-batches summed before each optimizer step. The effective "
+             "batch is --batch-size times this.",
+    )
+    parser.add_argument(
+        "--eval-steps",
+        type=int,
+        default=100,
+        help="Evaluate (and checkpoint) every N optimizer steps",
+    )
+    parser.add_argument(
         "--gradient-checkpointing",
         action="store_true",
         help="Enable gradient checkpointing to reduce memory usage (allows larger batch sizes)",
@@ -185,6 +200,11 @@ def main():
     """Main training pipeline."""
     args = parse_args()
 
+    # Seed before anything builds a model. The Trainer seeds too, but by then
+    # setup_model has already drawn the classification head from an unseeded
+    # generator, which is what made --seed decorative.
+    set_seed(args.seed)
+
     logger.info("=" * 60)
     logger.info("NAICS GitHub Repository Classifier - Training")
     logger.info("=" * 60)
@@ -197,6 +217,7 @@ def main():
     logger.info(f"Batch size: {args.batch_size}")
     logger.info(f"Learning rate: {args.learning_rate}")
     logger.info(f"Early stopping patience: {args.early_stopping_patience}")
+    logger.info(f"Seed: {args.seed}")
     logger.info(f"Gradient checkpointing: {args.gradient_checkpointing}")
 
     # Set output directory
@@ -292,6 +313,16 @@ def main():
     logger.info("Configuring Training")
     logger.info("=" * 40)
 
+    total_steps = count_training_steps(
+        num_examples=len(tokenized_dataset["train"]),
+        batch_size=args.batch_size,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
+        num_epochs=args.epochs,
+    )
+    logger.info(f"Optimizer steps: {total_steps} ({args.batch_size} x "
+                f"{args.gradient_accumulation_steps} = effective batch "
+                f"{args.batch_size * args.gradient_accumulation_steps})")
+
     training_args = get_training_args(
         output_dir=str(output_dir),
         num_epochs=args.epochs,
@@ -299,8 +330,12 @@ def main():
         learning_rate=args.learning_rate,
         weight_decay=args.weight_decay,
         warmup_ratio=args.warmup_ratio,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
+        eval_steps=args.eval_steps,
+        save_steps=args.eval_steps,
         use_bf16=not args.no_bf16,
         seed=args.seed,
+        num_training_steps=total_steps,
     )
 
     # Train model

@@ -116,3 +116,42 @@ def test_clean_readme_text_is_unchanged():
     assert clean_readme_text("# H\n\n**b**") == "H b"
     assert clean_readme_text("see https://github.com/a/b now") == "see github.com now"
     assert clean_readme_text(None) == ""
+
+
+# ---------------------------------------------------------------- frozen behaviour
+# clean_readme_text is part of the trained model's contract. These tests pin the
+# two rules that look like bugs and are not: see the docstring of the function.
+
+def test_installation_rule_truncates_to_end_of_string():
+    """Everything after the first install command is dropped, by design.
+
+    The published training file was built this way, so the model expects it.
+    Changing this means retraining.
+    """
+    text = "A farm management tool. pip install farmtool Then run it. It predicts crop yields."
+    assert clean_readme_text(text) == "A farm management tool."
+
+
+def test_code_fences_are_stripped_but_their_bodies_survive():
+    """The 'keep language info' rule never fires; code bodies reach the model."""
+    cleaned = clean_readme_text("intro\n```python\nimport torch\n```\nend")
+    assert "code-python" not in cleaned
+    assert "import torch" in cleaned
+
+
+def test_pd_na_is_treated_as_missing():
+    """pd.NA must not reach the model as the literal string '<NA>'."""
+    import pandas as pd
+
+    assert clean_readme_text(pd.NA) == ""
+    assert clean_topics(pd.NA) == ""
+    assert decode_description(pd.NA) == ""
+    assert format_model_input(repo_name="r", description=pd.NA, topics=pd.NA, readme=pd.NA) == "Repository: r"
+
+
+def test_clean_topics_is_idempotent():
+    """format_model_input cleans topics, and the training path may have already
+    done so; applying it twice must not change the result."""
+    for value in (["a", "b"], "['a', 'b']", "a,b", ["deep, learning", "nlp"], None, "[]"):
+        once = clean_topics(value)
+        assert clean_topics(once) == once, f"not idempotent for {value!r}"

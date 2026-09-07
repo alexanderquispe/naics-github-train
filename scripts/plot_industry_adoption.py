@@ -113,6 +113,16 @@ def load_claude_first_use() -> pd.DataFrame:
     path = PROCESSED_DIR / "first_claude_commits.parquet"
     logger.info(f"Loading Claude first use dates from {path}")
 
+    if not path.exists():
+        raise SystemExit(
+            f"{path} not found.\n\n"
+            "This script plots industry adoption over time and needs a table of "
+            "first-use dates per repository, with columns repo_nwo and "
+            "first_claude_commit. Nothing in this repository produces that file: "
+            "it comes from a separate commit-history extraction. Supply it at "
+            "the path above to run this script."
+        )
+
     df = pd.read_parquet(path)
     df = df.rename(columns={"repo_nwo": "nwo", "first_claude_commit": "first_use_date"})
     df["first_use_date"] = pd.to_datetime(df["first_use_date"], utc=True)

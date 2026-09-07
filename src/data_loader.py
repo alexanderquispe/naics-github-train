@@ -129,9 +129,9 @@ def prepare_naics_dataset(
         df = df[df[target_column].isin(valid_classes)]
         logger.info(f"After filtering: {len(df)} examples, {len(valid_classes)} classes")
 
-    # Clean topics if available
-    if "topics" in df.columns:
-        df["topics"] = df["topics"].apply(clean_topics)
+    # Topics are normalised inside format_model_input, once. Cleaning them here
+    # as well used to rewrite commas twice, so a topic containing a comma came
+    # out differently in training than at inference.
 
     # Create text inputs
     logger.info("Creating text inputs from repository data...")

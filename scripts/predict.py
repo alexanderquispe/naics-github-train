@@ -110,6 +110,13 @@ def parse_args():
         help="Show NAICS code descriptions",
     )
     parser.add_argument(
+        "--device",
+        type=str,
+        default=None,
+        choices=["cuda", "mps", "cpu"],
+        help="Compute device. Auto-detected (CUDA, then MPS, then CPU) when omitted.",
+    )
+    parser.add_argument(
         "--batch-size",
         type=int,
         default=16,
@@ -117,6 +124,32 @@ def parse_args():
     )
 
     return parser.parse_args()
+
+
+def _readme_argument(value):
+    """--readme takes README content or a path to a file holding it.
+
+    Path.exists() raises OSError on anything over 255 bytes per path component,
+    so the length has to be checked first: a real README is text, not a path.
+    """
+    if not value:
+        return value
+    if len(value) < 255 and "\n" not in value:
+        candidate = Path(value)
+        try:
+            if candidate.is_file():
+                return candidate.read_text()
+        except OSError:
+            pass
+    return value
+
+
+def _first_column(df, names):
+    """First of `names` present in df, or None."""
+    for name in names:
+        if name in df.columns:
+            return name
+    return None
 
 
 def predict_single(
@@ -198,14 +231,32 @@ def predict_from_file(
 
     logger.info(f"Loaded {len(df)} repositories from {input_path}")
 
-    # Prepare text inputs
+    # Accept the column names the README documents and the ones
+    # scripts/inference_batch.py accepts, and fail loudly if the repository name
+    # or the README cannot be found rather than classifying blank text.
+    name_col = _first_column(df, ["name_repo", "repo", "name", "nwo", "repo_name"])
+    readme_col = _first_column(df, ["readme_content", "readme", "readme_text"])
+    desc_col = _first_column(df, ["description", "desc"])
+    topics_col = _first_column(df, ["topics", "topic"])
+    logger.info(
+        f"Using columns: name={name_col}, description={desc_col}, "
+        f"topics={topics_col}, readme={readme_col}"
+    )
+    if name_col is None and readme_col is None:
+        logger.error(
+            "Neither a repository-name column (name_repo, repo, name, nwo, "
+            "repo_name) nor a README column (readme_content, readme, "
+            "readme_text) was found. Columns present: %s", list(df.columns)
+        )
+        sys.exit(1)
+
     texts = []
     for _, row in df.iterrows():
         text = format_repository_input(
-            repo_name=row.get("name_repo") or row.get("repo"),
-            description=row.get("description"),
-            topics=row.get("topics"),
-            readme=row.get("readme_content"),
+            repo_name=row.get(name_col) if name_col else None,
+            description=row.get(desc_col) if desc_col else None,
+            topics=row.get(topics_col) if topics_col else None,
+            readme=row.get(readme_col) if readme_col else None,
         )
         texts.append(text)
 
@@ -264,15 +315,18 @@ def main():
     """Main prediction pipeline."""
     args = parse_args()
 
-    # Check model path
-    model_path = Path(args.model)
-    if not model_path.exists():
-        logger.error(f"Model not found: {model_path}")
-        sys.exit(1)
+    # A local directory or a Hugging Face id; load_trained_model validates both.
+    model_path = args.model
 
-    # Load model
     logger.info(f"Loading model from {model_path}")
-    model, tokenizer, label_mappings = load_trained_model(model_path)
+    model, tokenizer, label_mappings = load_trained_model(model_path, device=args.device)
+
+    # Flags that only apply to one mode used to be accepted and dropped in
+    # silence. Say so instead, so nobody waits for a file that is never written.
+    if args.input_file and args.top_k > 1:
+        logger.warning("--top-k applies to single predictions only; file mode writes the top label per row")
+    if not args.input_file and args.output:
+        logger.warning("--output applies to --input-file only; single predictions are printed, not written")
 
     # Determine input type and make predictions
     if args.input_file:
@@ -293,7 +347,9 @@ def main():
             model=model,
             tokenizer=tokenizer,
             label_mappings=label_mappings,
-            text=args.input,
+            # through the shared builder, so a bare sentence gets the same
+            # scaffolding and cleaning the model was trained on
+            text=format_repository_input(description=args.input),
             top_k=args.top_k,
             show_confidence=args.show_confidence,
             show_description=args.show_description,
@@ -301,10 +357,7 @@ def main():
 
     elif args.repo_name or args.description or args.readme:
         # Build input from components
-        readme_content = args.readme
-        if readme_content and Path(readme_content).exists():
-            # Load README from file if path provided
-            readme_content = Path(readme_content).read_text()
+        readme_content = _readme_argument(args.readme)
 
         text = format_repository_input(
             repo_name=args.repo_name,
