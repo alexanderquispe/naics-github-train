@@ -17,6 +17,8 @@ from transformers import (
     pipeline,
 )
 
+from .text_format import format_model_input
+
 logger = logging.getLogger(__name__)
 
 
@@ -256,31 +258,31 @@ def format_repository_input(
     description: Optional[str] = None,
     topics: Optional[str] = None,
     readme: Optional[str] = None,
+    clean_text: bool = True,
 ) -> str:
     """
     Format repository data into model input format.
 
+    Applies the same preprocessing as training (see `src/text_format.py`):
+    the four fields are joined and `clean_readme_text` is applied to the result.
+    Before version 1.1 this function did not clean the text, which fed the model
+    raw markdown while it had been fine-tuned on cleaned text.
+
     Args:
         repo_name: Repository name
         description: Repository description
-        topics: Repository topics (semicolon-separated)
+        topics: Repository topics (list, repr of a list, or separated string)
         readme: README content
+        clean_text: Apply the training-time cleaning. Pass False only to
+            reproduce the pre-1.1 behaviour.
 
     Returns:
         Formatted text string for model input
     """
-    components = []
-
-    if repo_name:
-        components.append(f"Repository: {repo_name}")
-
-    if description:
-        components.append(f"Description: {description}")
-
-    if topics:
-        components.append(f"Topics: {topics}")
-
-    if readme:
-        components.append(f"README: {readme}")
-
-    return " | ".join(components)
+    return format_model_input(
+        repo_name=repo_name,
+        description=description,
+        topics=topics,
+        readme=readme,
+        clean_text=clean_text,
+    )

@@ -5,8 +5,6 @@ This module provides functions for loading, cleaning, and preparing
 GitHub repository data for NAICS classification model training.
 """
 
-import re
-import ast
 import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
@@ -15,6 +13,13 @@ import numpy as np
 import pandas as pd
 from datasets import Dataset, DatasetDict
 from sklearn.model_selection import train_test_split
+
+from .text_format import (  # noqa: F401  (re-exported for backwards compatibility)
+    clean_readme_text,
+    clean_topics,
+    decode_description,
+    format_model_input,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,116 +51,6 @@ def load_parquet_data(file_path: Union[str, Path]) -> pd.DataFrame:
         raise ValueError(f"Failed to load parquet file: {e}")
 
 
-def clean_topics(topic_str) -> str:
-    """
-    Clean and normalize the topics field.
-
-    Handles various formats: lists, string representations of lists,
-    comma-separated strings, etc.
-
-    Args:
-        topic_str: Topics field value (various formats)
-
-    Returns:
-        Cleaned topics string with semicolon separation
-    """
-    # Handle None/NaN values
-    if topic_str is None or (isinstance(topic_str, float) and pd.isna(topic_str)):
-        return ""
-
-    # Handle arrays/lists
-    if isinstance(topic_str, (list, tuple, np.ndarray)):
-        if len(topic_str) == 0:
-            return ""
-        return "; ".join([str(item) for item in topic_str if item])
-
-    # Handle empty strings
-    if isinstance(topic_str, str) and (topic_str == "" or topic_str == "[]"):
-        return ""
-
-    try:
-        # If it's a string representation of a list
-        if isinstance(topic_str, str):
-            if topic_str.startswith("[") and topic_str.endswith("]"):
-                try:
-                    topic_list = ast.literal_eval(topic_str)
-                    if isinstance(topic_list, list):
-                        return "; ".join([str(item) for item in topic_list if item])
-                except (ValueError, SyntaxError):
-                    pass
-
-            # Clean string format
-            return topic_str.replace("[", "").replace("]", "").replace(",", ";").strip()
-
-        # Convert other types to string
-        return str(topic_str)
-
-    except Exception as e:
-        logger.warning(f"Error processing topic: {topic_str}, Error: {e}")
-        return ""
-
-
-def clean_readme_text(text: str) -> str:
-    """
-    Clean README text by removing markdown artifacts, code blocks, and noise.
-
-    Args:
-        text: Raw README content
-
-    Returns:
-        Cleaned text string
-    """
-    if not text or pd.isna(text):
-        return ""
-
-    text = str(text)
-
-    # Remove badges and shields
-    text = re.sub(r"!\[.*?\]\(.*?\)", "", text)  # ![badge](url)
-    text = re.sub(r"\[!\[.*?\]\(.*?\)\]\(.*?\)", "", text)  # [![badge](url)](link)
-
-    # Remove license/copyright headers
-    text = re.sub(
-        r"(MIT License|Apache License|GPL|BSD|Copyright.*?)(\n|$)",
-        "",
-        text,
-        flags=re.IGNORECASE,
-    )
-
-    # Clean URLs but keep domain info
-    text = re.sub(r"https?://([^/\s]+)[^\s]*", r"\1", text)
-
-    # Remove excessive markdown formatting
-    text = re.sub(r"^#{1,6}\s*", "", text, flags=re.MULTILINE)  # Headers
-    text = re.sub(r"[*_~`]{1,2}", "", text)  # Bold/italic/code markers
-
-    # Remove code blocks but keep language info
-    text = re.sub(r"```(\w+)?\n.*?\n```", r"code-\1", text, flags=re.DOTALL)
-    text = re.sub(r"`([^`]+)`", r"\1", text)  # Inline code
-
-    # Normalize technology mentions
-    text = re.sub(r"\b(javascript|js)\b", "javascript", text, flags=re.IGNORECASE)
-    text = re.sub(r"\b(python|py)\b", "python", text, flags=re.IGNORECASE)
-    text = re.sub(r"\b(react|reactjs)\b", "react", text, flags=re.IGNORECASE)
-    text = re.sub(r"\b(node|nodejs)\b", "nodejs", text, flags=re.IGNORECASE)
-
-    # Clean excessive punctuation
-    text = re.sub(r"[!]{2,}", "!", text)
-    text = re.sub(r"[?]{2,}", "?", text)
-    text = re.sub(r"[.]{3,}", "...", text)
-
-    # Normalize whitespace
-    text = re.sub(r"\n\s*\n", " ", text)
-    text = re.sub(r"\s+", " ", text)
-
-    # Remove common installation noise
-    text = re.sub(
-        r"(npm install|pip install|git clone).*?(\n|$)", "", text, flags=re.IGNORECASE
-    )
-
-    return text.strip()
-
-
 def prepare_text_input(
     row: pd.Series,
     clean_text: bool = True,
@@ -163,6 +58,9 @@ def prepare_text_input(
 ) -> str:
     """
     Format repository data into a single text input for the model.
+
+    Thin wrapper over `text_format.format_model_input`, which is also what every
+    inference path uses, so training and prediction cannot drift apart.
 
     Args:
         row: DataFrame row with repository data
@@ -172,38 +70,17 @@ def prepare_text_input(
     Returns:
         Formatted text string
     """
-    components = []
+    readme = row.get("readme_content")
+    if max_readme_words and pd.notna(readme):
+        readme = " ".join(str(readme).split()[:max_readme_words])
 
-    # Repository name
-    if pd.notna(row.get("name_repo")):
-        components.append(f"Repository: {row['name_repo']}")
-    elif pd.notna(row.get("repo")):
-        components.append(f"Repository: {row['repo']}")
-
-    # Description
-    if pd.notna(row.get("description")):
-        components.append(f"Description: {row['description']}")
-
-    # Topics
-    if "topics" in row.index and pd.notna(row["topics"]) and str(row["topics"]).strip():
-        components.append(f"Topics: {row['topics']}")
-
-    # README content
-    if pd.notna(row.get("readme_content")):
-        readme_text = str(row["readme_content"])
-        if max_readme_words:
-            readme_words = readme_text.split()[:max_readme_words]
-            readme_text = " ".join(readme_words)
-        components.append(f"README: {readme_text}")
-
-    # Combine components
-    combined_text = " | ".join(components)
-
-    # Clean if requested
-    if clean_text:
-        combined_text = clean_readme_text(combined_text)
-
-    return combined_text
+    return format_model_input(
+        repo_name=row.get("name_repo") if pd.notna(row.get("name_repo")) else row.get("repo"),
+        description=row.get("description"),
+        topics=row["topics"] if "topics" in row.index else None,
+        readme=readme,
+        clean_text=clean_text,
+    )
 
 
 def prepare_naics_dataset(

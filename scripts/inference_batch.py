@@ -8,7 +8,7 @@ Usage:
 
 import argparse
 import logging
-import re
+import sys
 from pathlib import Path
 from typing import List, Optional
 
@@ -16,6 +16,9 @@ import pandas as pd
 import torch
 from tqdm import tqdm
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipeline
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from src.text_format import format_model_input  # noqa: E402
 
 # Setup logging
 logging.basicConfig(
@@ -48,124 +51,41 @@ NAICS_DESCRIPTIONS = {
 }
 
 
-def clean_readme_text(text: str) -> str:
-    """
-    Clean README text by removing markdown artifacts, code blocks, and noise.
-    This is the SAME cleaning function used during training.
-
-    Args:
-        text: Raw README content
-
-    Returns:
-        Cleaned text string
-    """
-    if not text or pd.isna(text):
-        return ""
-
-    text = str(text)
-
-    # Remove badges and shields
-    text = re.sub(r"!\[.*?\]\(.*?\)", "", text)  # ![badge](url)
-    text = re.sub(r"\[!\[.*?\]\(.*?\)\]\(.*?\)", "", text)  # [![badge](url)](link)
-
-    # Remove license/copyright headers
-    text = re.sub(
-        r"(MIT License|Apache License|GPL|BSD|Copyright.*?)(\n|$)",
-        "",
-        text,
-        flags=re.IGNORECASE,
-    )
-
-    # Clean URLs but keep domain info
-    text = re.sub(r"https?://([^/\s]+)[^\s]*", r"\1", text)
-
-    # Remove excessive markdown formatting
-    text = re.sub(r"^#{1,6}\s*", "", text, flags=re.MULTILINE)  # Headers
-    text = re.sub(r"[*_~`]{1,2}", "", text)  # Bold/italic/code markers
-
-    # Remove code blocks but keep language info
-    text = re.sub(r"```(\w+)?\n.*?\n```", r"code-\1", text, flags=re.DOTALL)
-    text = re.sub(r"`([^`]+)`", r"\1", text)  # Inline code
-
-    # Normalize technology mentions
-    text = re.sub(r"\b(javascript|js)\b", "javascript", text, flags=re.IGNORECASE)
-    text = re.sub(r"\b(python|py)\b", "python", text, flags=re.IGNORECASE)
-    text = re.sub(r"\b(react|reactjs)\b", "react", text, flags=re.IGNORECASE)
-    text = re.sub(r"\b(node|nodejs)\b", "nodejs", text, flags=re.IGNORECASE)
-
-    # Clean excessive punctuation
-    text = re.sub(r"[!]{2,}", "!", text)
-    text = re.sub(r"[?]{2,}", "?", text)
-    text = re.sub(r"[.]{3,}", "...", text)
-
-    # Normalize whitespace
-    text = re.sub(r"\n\s*\n", " ", text)
-    text = re.sub(r"\s+", " ", text)
-
-    # Remove common installation noise
-    text = re.sub(
-        r"(npm install|pip install|git clone).*?(\n|$)", "", text, flags=re.IGNORECASE
-    )
-
-    return text.strip()
-
-
 def format_input_text(
     name: str,
     description: Optional[str] = None,
     topics: Optional[str] = None,
     readme: Optional[str] = None,
-    max_readme_chars: int = 5000,
+    max_readme_chars: Optional[int] = None,
     clean_text: bool = True,
 ) -> str:
     """
     Format repository data into the expected input format for the model.
-    Applies the SAME preprocessing as used during training.
+
+    Delegates to `src/text_format.py`, the single builder shared with training,
+    so batch inference and fine-tuning cannot disagree about the input.
 
     Args:
         name: Repository name
         description: Repository description
         topics: Topics/tags (can be string or list)
         readme: README content
-        max_readme_chars: Maximum characters to include from README
+        max_readme_chars: Truncate the README to this many characters. None
+            matches training; the tokenizer truncates at max_length tokens in
+            any case.
         clean_text: Whether to apply text cleaning (should match training)
 
     Returns:
         Formatted text string
     """
-    components = []
-
-    # Repository name
-    if name and str(name).strip():
-        components.append(f"Repository: {name}")
-
-    # Description
-    if description and str(description).strip() and str(description) != "nan":
-        components.append(f"Description: {description}")
-
-    # Topics
-    if topics and str(topics).strip() and str(topics) not in ["nan", "[]", ""]:
-        # Handle list or string format
-        if isinstance(topics, list):
-            topics_str = "; ".join(str(t) for t in topics if t)
-        else:
-            topics_str = str(topics).replace("[", "").replace("]", "").replace(",", ";").replace("'", "")
-        if topics_str.strip():
-            components.append(f"Topics: {topics_str}")
-
-    # README content (truncate if too long)
-    if readme and str(readme).strip() and str(readme) != "nan":
-        readme_text = str(readme)[:max_readme_chars]
-        components.append(f"README: {readme_text}")
-
-    # Combine components
-    combined_text = " | ".join(components)
-
-    # Apply same cleaning as training
-    if clean_text:
-        combined_text = clean_readme_text(combined_text)
-
-    return combined_text
+    return format_model_input(
+        repo_name=name,
+        description=description,
+        topics=topics,
+        readme=readme,
+        clean_text=clean_text,
+        max_readme_chars=max_readme_chars,
+    )
 
 
 def resolve_device(device: Optional[str] = None) -> str:
@@ -303,7 +223,7 @@ def run_inference(
     token: Optional[str] = None,
     fp16: Optional[bool] = None,
     clean_text: bool = True,
-    max_readme_chars: int = 5000,
+    max_readme_chars: Optional[int] = None,
     local_files_only: bool = False,
 ):
     """
@@ -498,9 +418,10 @@ def main():
     parser.add_argument(
         "--max-readme-chars",
         type=int,
-        default=5000,
-        help="Truncate README to this many characters (default: 5000; the "
-             "production pipeline uses 3000)"
+        default=None,
+        help="Truncate README to this many characters. Default: no truncation, "
+             "which is what training does; the tokenizer cuts at --max-length "
+             "tokens in any case. The published production datasets used 3000."
     )
 
     args = parser.parse_args()

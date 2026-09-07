@@ -134,14 +134,25 @@ Available models:
 
 ### Making Predictions
 
+Build the input with `format_repository_input`. It applies the same
+preprocessing the model was fine-tuned on; assembling the string by hand feeds
+the model raw markdown it never saw in training.
+
 ```python
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 import torch
 
+from src.inference import format_repository_input
+
 model = AutoModelForSequenceClassification.from_pretrained("aquiro1994/naics-github-classifier")
 tokenizer = AutoTokenizer.from_pretrained("aquiro1994/naics-github-classifier")
 
-text = "Repository: mediscan | Description: AI diagnostic tool for radiology | README: Medical imaging analysis..."
+text = format_repository_input(
+    repo_name="mediscan",
+    description="AI diagnostic tool for radiology",
+    topics=["healthcare", "medical-imaging"],
+    readme="# MediScan\n\nMedical **imaging** analysis for radiologists...",
+)
 
 inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
 outputs = model(**inputs)
@@ -150,6 +161,35 @@ predicted_class = torch.argmax(outputs.logits, dim=1).item()
 id2label = model.config.id2label
 print(f"Predicted NAICS: {id2label[predicted_class]}")
 ```
+
+### One input format, everywhere
+
+`src/text_format.py` holds the only function that builds the model's input,
+`format_model_input`. Training (`data_loader.prepare_text_input`), single
+prediction (`inference.format_repository_input`, `scripts/predict.py`) and batch
+inference (`scripts/inference_batch.py`) all delegate to it, so fine-tuning and
+prediction cannot disagree about what the model reads. The format is:
+
+```
+Repository: <name> | Description: <description> | Topics: <a; b> | README: <readme>
+```
+
+with `clean_readme_text` applied to the joined string: badges, licence headers,
+markdown decoration and code blocks removed, URLs reduced to their domain,
+whitespace collapsed. Missing fields are dropped along with their separator, a
+topics list becomes `a; b`, and a description serialised as a Python bytes repr
+(`b'inform\xc3\xa1tica'`) is decoded back to text.
+
+`tests/test_text_format.py` asserts that the three entry points produce the same
+string, character for character.
+
+> **Changed in 1.1.** Before this version `format_repository_input` and the
+> snippet above did **not** clean the text, while training did, so
+> `scripts/predict.py` fed the model raw markdown. Measured on 25,000 GitHub
+> repositories the effect is small -- the two formats give the same sector for
+> 99.4% of the repositories the model is confident about, and retention at a
+> 0.8 threshold moves by 0.1 points -- but the mismatch was real. Pass
+> `clean_text=False` for the old behaviour.
 
 ### Batch Inference
 
@@ -223,9 +263,10 @@ shrinking the batch.
 ### Reproducing the published NAICS datasets
 
 The production pipeline that generated the published datasets does **not** apply
-`clean_readme_text`, and truncates the README to 3,000 characters rather than
-5,000. The defaults here keep the historical behaviour; to reproduce production
-output exactly, pass:
+`clean_readme_text`, and truncates the README to 3,000 characters. Neither is
+what training does, so the defaults here no longer reproduce it: `--max-readme-chars`
+now defaults to no truncation, matching training. To reproduce the published
+output exactly, pass both flags:
 
 ```bash
 python scripts/inference_batch.py \
@@ -235,7 +276,17 @@ python scripts/inference_batch.py \
 
 Measured against the published predictions on a 400-repo sample, restricted to
 the `score >= 0.8` rows that the analysis actually keeps: **100.00%** label
-agreement with these flags, **97.35%** with the defaults.
+agreement with these flags, **97.35%** with the defaults. Use them for
+replication only; for new work the defaults match training and are the right
+choice.
+
+### Tests
+
+```bash
+python -m pytest tests/ -q
+```
+
+`tests/test_text_format.py` locks the training/inference input contract.
 
 ### Industry Adoption Visualization
 
