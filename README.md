@@ -6,9 +6,34 @@ Fine-tuning transformer models to classify GitHub repositories into NAICS (North
 
 | Model | Test F1 | Test Accuracy | Training Time |
 |-------|---------|---------------|---------------|
-| **RoBERTa-large** | **86.33%** | **86.72%** | ~8 min (A100) |
+| **BGE-M3** (multilingual) | **86.39%** | **86.95%** | ~90 min (M5 Max) |
+| **RoBERTa-large** (English) | **86.33%** | **86.72%** | ~8 min (A100) |
 
-**Pre-trained model available:** [huggingface.co/aquiro1994/naics-github-classifier](https://huggingface.co/aquiro1994/naics-github-classifier)
+Both are on the Hub; the next section says which to use.
+
+## Two published models
+
+| | English | Multilingual |
+|---|---|---|
+| Model | [`aquiro1994/naics-github-classifier`](https://huggingface.co/aquiro1994/naics-github-classifier) | [`aquiro1994/naics-github-classifier-multilingual`](https://huggingface.co/aquiro1994/naics-github-classifier-multilingual) |
+| Encoder | RoBERTa-large (355M) | BGE-M3 (568M) |
+| Vocabulary | 50,265 tokens, English | 250,002 tokens, 100+ languages |
+| Test accuracy | 86.72% | 86.95% |
+| Weighted F1 | 86.33% | 86.39% |
+| Macro F1 | 82.95% | 83.06% |
+| A README and its own translation get the same sector | 19% | 73% |
+| Train with | `--model roberta-large` | `--model bge-m3` |
+
+On English text they are indistinguishable; the difference is that only the
+second reads a README that is not in English, which on public GitHub is about
+12% of repositories. Both come out of training calibrated, so `score >= 0.8`
+means what it says.
+
+The multilingual model's **training data is still English**. What BGE-M3 adds is
+a shared representation space from its own pre-training, so a Spanish or Chinese
+README lands near its English equivalent and the head trained on English still
+applies. Training on multilingual labelled data would be the next step, and
+nothing here measures what it would add.
 
 ## Quick Start
 
