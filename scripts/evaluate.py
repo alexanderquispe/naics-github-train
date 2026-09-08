@@ -11,6 +11,7 @@ Usage:
 """
 
 import argparse
+import json
 import logging
 import sys
 from pathlib import Path
@@ -83,9 +84,10 @@ def parse_args():
     parser.add_argument(
         "--max-seq-length",
         type=int,
-        default=2048,
-        help="Maximum sequence length. Clamped to 512 for every model except "
-             "ModernBERT, as scripts/train.py does.",
+        default=512,
+        help="Tokens per example. Overridden by the model's training_config.json "
+             "when present, so evaluation matches training; clamped to the "
+             "model's positional limit in any case.",
     )
     parser.add_argument(
         "--min-samples",
@@ -188,6 +190,31 @@ def main():
     # A local directory or a Hugging Face id; load_trained_model validates both.
     model_path = args.model
 
+    # If the model was trained by scripts/train.py it carries the settings that
+    # define its split and its input. Use them unless the caller overrode them
+    # explicitly: evaluating with a different min_samples or seed rebuilds a
+    # different split and scores the model on rows it was trained on.
+    given = {a.lstrip("-").replace("-", "_") for a in sys.argv if a.startswith("--")}
+    tc_path = Path(model_path) / "training_config.json"
+    if tc_path.exists():
+        tc = json.loads(tc_path.read_text())
+        logger.info(f"Found training_config.json; reusing the settings it records")
+        for key in ("max_seq_length", "min_samples", "test_size", "val_size", "seed"):
+            source = {"min_samples": "min_samples_per_class"}.get(key, key)
+            if source in tc and key not in given:
+                if getattr(args, key) != tc[source]:
+                    logger.info(f"  {key}: {getattr(args, key)} -> {tc[source]} (from training)")
+                setattr(args, key, tc[source])
+        if "data" in tc and "test_data" not in given and Path(tc["data"]).exists():
+            logger.info(f"  test_data: {args.test_data} -> {tc['data']} (from training)")
+            args.test_data = tc["data"]
+    else:
+        logger.warning(
+            "No training_config.json in the model directory. The split is being "
+            "rebuilt from --min-samples/--test-size/--val-size/--seed; if those "
+            "differ from training, the scores below are meaningless."
+        )
+
 
     logger.info(f"Model: {model_path}")
     logger.info(f"Test data: {args.test_data}")
@@ -260,8 +287,9 @@ def main():
         # RoBERTa reserves two positions (pad + offset), hence the margin
         usable = model_limit - 2 if model_limit <= 1024 else model_limit
         if max_seq_length > usable:
-            logger.info(f"Clamping max_seq_length {max_seq_length} -> {min(usable, 512) if usable < 2048 else usable}")
-            max_seq_length = min(max_seq_length, usable)
+            logger.info(f"Clamping max_seq_length {max_seq_length} -> {usable} "
+                        f"(the model's positional limit)")
+            max_seq_length = usable
 
     tokenized_dataset = tokenize_dataset(
         dataset_dict,

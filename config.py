@@ -39,7 +39,16 @@ SUPPORTED_MODELS: Dict[str, str] = {
     "deberta-v3-large": "microsoft/deberta-v3-large",
     "roberta-base": "roberta-base",
     "roberta-large": "roberta-large",
+    # Multilingual. XLM-RoBERTa architecture, 250k-token vocabulary covering
+    # 100+ languages, so unlike the models above it reads a README that is not
+    # in English. Trained here at 512 tokens: a 1,024-token run scored 0.5
+    # points lower, the signal is in the opening of the readme.
+    "bge-m3": "BAAI/bge-m3",
 }
+
+# Models whose positional embeddings allow more than 512 tokens. Everything else
+# is capped at 512, which is also the default for these.
+LONG_CONTEXT_MODELS = ("modernbert", "bge-m3")
 
 
 @dataclass
@@ -61,11 +70,10 @@ class ModelConfig:
 
     def __post_init__(self):
         # Adjust max_seq_length based on model capabilities
-        if "modernbert" in self.model_name:
-            # ModernBERT supports up to 8192 tokens
+        if any(k in self.model_name for k in LONG_CONTEXT_MODELS):
             self.max_seq_length = min(self.max_seq_length, 8192)
-        elif "deberta" in self.model_name or "roberta" in self.model_name:
-            # DeBERTa and RoBERTa typically support up to 512 tokens
+        else:
+            # DeBERTa and RoBERTa support up to 512 tokens
             self.max_seq_length = min(self.max_seq_length, 512)
 
 

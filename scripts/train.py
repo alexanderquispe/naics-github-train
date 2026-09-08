@@ -11,6 +11,7 @@ Usage:
 """
 
 import argparse
+import json
 import logging
 import sys
 from pathlib import Path
@@ -21,6 +22,7 @@ sys.path.insert(0, str(project_root))
 
 from config import (
     SUPPORTED_MODELS,
+    LONG_CONTEXT_MODELS,
     RAW_DATA_DIR,
     MODELS_DIR,
     OUTPUTS_DIR,
@@ -75,8 +77,9 @@ def parse_args():
     parser.add_argument(
         "--max-seq-length",
         type=int,
-        default=2048,
-        help="Maximum sequence length for tokenization",
+        default=512,
+        help="Tokens per example. 512 is what every published model was trained "
+             "with; ModernBERT and BGE-M3 accept more if you ask for it.",
     )
 
     # Data arguments
@@ -296,11 +299,19 @@ def main():
     logger.info("Tokenizing Dataset")
     logger.info("=" * 40)
 
-    # Adjust max_seq_length based on model
+    # Resolve the sequence length. 512 unless the model is long-context AND the
+    # caller asked for more, and never beyond what the positional embeddings
+    # allow. The resolved value is written next to the model so evaluate.py
+    # cannot silently use a different one.
     max_seq_length = args.max_seq_length
-    if "modernbert" not in args.model:
+    if not any(k in args.model for k in LONG_CONTEXT_MODELS):
         max_seq_length = min(max_seq_length, 512)
-        logger.info(f"Adjusted max_seq_length to {max_seq_length} for {args.model}")
+    model_limit = getattr(model.config, "max_position_embeddings", None)
+    if model_limit:
+        usable = model_limit - 2 if model_limit <= 1024 else model_limit
+        max_seq_length = min(max_seq_length, usable)
+    logger.info(f"Sequence length: {max_seq_length} "
+                f"(requested {args.max_seq_length}, model limit {model_limit})")
 
     tokenized_dataset = tokenize_dataset(
         dataset_dict,
@@ -391,6 +402,39 @@ def main():
         label2id=label2id,
         id2label=id2label,
     )
+
+    # Record the settings that define the split and the input, so evaluate.py
+    # can reuse them instead of guessing. Evaluating with a different
+    # min_samples or seed silently scores the model on rows it trained on.
+    training_config = {
+        "model": args.model,
+        "model_id": model_id,
+        "data": str(data_path),
+        "max_seq_length": max_seq_length,
+        "min_samples_per_class": args.min_samples,
+        "test_size": args.test_size,
+        "val_size": args.val_size,
+        "seed": args.seed,
+        "epochs": args.epochs,
+        "batch_size": args.batch_size,
+        "gradient_accumulation_steps": args.gradient_accumulation_steps,
+        "effective_batch_size": args.batch_size * args.gradient_accumulation_steps,
+        "learning_rate": args.learning_rate,
+        "weight_decay": args.weight_decay,
+        "warmup_ratio": args.warmup_ratio,
+        "eval_steps": args.eval_steps,
+        "early_stopping_patience": args.early_stopping_patience,
+        "optimizer_steps": total_steps,
+        "num_classes": len(label2id),
+        "n_train": len(tokenized_dataset["train"]),
+        "n_validation": len(tokenized_dataset["validation"]),
+        "n_test": len(tokenized_dataset["test"]),
+        "val_f1": val_results.get("eval_f1"),
+        "test_f1": test_results.get("eval_f1"),
+        "test_accuracy": test_results.get("eval_accuracy"),
+    }
+    (output_dir / "training_config.json").write_text(json.dumps(training_config, indent=2))
+    logger.info(f"Training configuration saved to {output_dir / 'training_config.json'}")
 
     logger.info("\n" + "=" * 60)
     logger.info("Training Complete!")
