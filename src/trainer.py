@@ -240,6 +240,25 @@ def get_callbacks(
     return callbacks
 
 
+def find_last_checkpoint(output_dir) -> Optional[str]:
+    """Newest checkpoint-N directory under output_dir, or None.
+
+    A run that is interrupted -- the machine sleeping, a crash -- leaves these
+    behind every save_steps optimizer steps. Resuming from one costs at most
+    save_steps of work instead of starting over.
+    """
+    output_dir = Path(output_dir)
+    if not output_dir.is_dir():
+        return None
+    checkpoints = [
+        d for d in output_dir.iterdir()
+        if d.is_dir() and d.name.startswith("checkpoint-") and d.name[11:].isdigit()
+    ]
+    if not checkpoints:
+        return None
+    return str(max(checkpoints, key=lambda d: int(d.name[11:])))
+
+
 def train_model(
     model: AutoModelForSequenceClassification,
     tokenizer: AutoTokenizer,
@@ -247,6 +266,7 @@ def train_model(
     training_args: TrainingArguments,
     early_stopping_patience: int = 2,
     early_stopping_threshold: float = 0.001,
+    resume_from_checkpoint=None,
 ) -> Tuple[Trainer, Dict[str, Any]]:
     """
     Train the model using the Hugging Face Trainer.
@@ -258,6 +278,8 @@ def train_model(
         training_args: Training configuration
         early_stopping_patience: Early stopping patience
         early_stopping_threshold: Early stopping threshold
+        resume_from_checkpoint: Path to a checkpoint-N directory to continue
+            from, or None to start fresh
 
     Returns:
         Tuple of (trainer, training_results)
@@ -287,8 +309,11 @@ def train_model(
         logger.info(f"Test examples: {len(tokenized_dataset['test'])}")
 
     # Train
-    logger.info("Starting training...")
-    train_result = trainer.train()
+    if resume_from_checkpoint:
+        logger.info(f"Resuming from {resume_from_checkpoint}")
+    else:
+        logger.info("Starting training...")
+    train_result = trainer.train(resume_from_checkpoint=resume_from_checkpoint)
 
     logger.info("Training completed!")
     logger.info(f"Training loss: {train_result.training_loss:.4f}")

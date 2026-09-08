@@ -43,6 +43,7 @@ from src.trainer import (
     evaluate_model,
     save_model,
     count_training_steps,
+    find_last_checkpoint,
 )
 from src.visualization import plot_label_distribution
 from transformers import set_seed
@@ -157,6 +158,13 @@ def parse_args():
         default=2,
         help="Micro-batches summed before each optimizer step. The effective "
              "batch is --batch-size times this.",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Continue from the newest checkpoint in the output directory. A run "
+             "interrupted by the machine sleeping or a crash leaves one every "
+             "--eval-steps steps; without this the run starts over.",
     )
     parser.add_argument(
         "--eval-steps",
@@ -354,12 +362,17 @@ def main():
     logger.info("Training Model")
     logger.info("=" * 40)
 
+    checkpoint = find_last_checkpoint(output_dir) if args.resume else None
+    if args.resume and checkpoint is None:
+        logger.warning(f"--resume given but no checkpoint found in {output_dir}; starting fresh")
+
     trainer, train_result = train_model(
         model=model,
         tokenizer=tokenizer,
         tokenized_dataset=tokenized_dataset,
         training_args=training_args,
         early_stopping_patience=args.early_stopping_patience,
+        resume_from_checkpoint=checkpoint,
     )
 
     # Evaluate on validation set
