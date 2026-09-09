@@ -226,6 +226,7 @@ def run_inference(
     max_readme_chars: Optional[int] = None,
     name_column: Optional[str] = None,
     readme_column: Optional[str] = None,
+    start_row: int = 0,
     local_files_only: bool = False,
 ):
     """
@@ -238,16 +239,34 @@ def run_inference(
         batch_size: Batch size for inference
         max_length: Maximum sequence length
         limit: Limit number of rows (for testing)
+        start_row: Skip this many rows first. With --limit this cuts the input
+            into chunks, so a long job can be run piece by piece and picked up
+            where it stopped rather than started over.
         device: Device to use
         token: Hugging Face token for private models
     """
     # Load data
     logger.info(f"Loading data from: {input_file}")
     df = pd.read_parquet(input_file)
+    total_rows = len(df)
 
+    if start_row:
+        if start_row >= total_rows:
+            raise SystemExit(
+                f"--start-row {start_row} is past the end of the file ({total_rows} rows)"
+            )
+        df = df.iloc[start_row:]
+        logger.info(f"Skipping the first {start_row:,} rows of {total_rows:,}")
     if limit:
         df = df.head(limit)
-        logger.info(f"Limited to {limit} rows for testing")
+    if start_row or limit:
+        logger.info(f"Rows {start_row:,} to {start_row + len(df) - 1:,} of {total_rows:,} "
+                    f"({len(df):,} in this run)")
+
+    # The row number in the source file, so chunks can be concatenated and
+    # checked without depending on the order they were produced in.
+    df = df.reset_index(drop=True)
+    df.insert(0, "source_row", range(start_row, start_row + len(df)))
 
     logger.info(f"Total rows: {len(df)}")
 
@@ -401,6 +420,13 @@ def main():
         help="Maximum sequence length (default: 512)"
     )
     parser.add_argument(
+        "--start-row",
+        type=int,
+        default=0,
+        help="Skip this many rows before starting. With --limit, cuts a long "
+             "job into chunks that can be run and resumed independently.",
+    )
+    parser.add_argument(
         "--limit", "-l",
         type=int,
         default=None,
@@ -484,6 +510,7 @@ def main():
         clean_text=args.clean_text,
         name_column=args.name_column,
         readme_column=args.readme_column,
+        start_row=args.start_row,
         max_readme_chars=args.max_readme_chars,
         local_files_only=args.local_files_only,
     )
