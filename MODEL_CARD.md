@@ -230,11 +230,12 @@ text = format_model_input(
 )
 ```
 
-Measured over 25,000 GitHub repositories, cleaned and uncleaned input give the
-same sector for 99.4% of the repositories the model is confident about, and
-retention at a 0.8 threshold moves by 0.1 points. The difference is small but it
-is free to get right, and on five short probes three moved across the 0.8
-threshold that downstream pipelines filter on.
+Measured over 25,000 GitHub repositories with this model's multilingual
+sibling, cleaned and uncleaned input give the same sector for 99.4% of the
+repositories it is confident about, and retention at a 0.8 threshold moves by
+0.1 points. The difference is small but it is free to get right, and on five
+short probes three moved across the 0.8 threshold that downstream pipelines
+filter on.
 
 ### What the cleaning does, including two surprises
 
@@ -273,7 +274,7 @@ Neither should be "fixed" without retraining and republishing this model.
 | Base Model | `roberta-large` |
 | Batch Size | 32, with 2 gradient accumulation steps: effective 64 |
 | Learning Rate | 1.5e-5 |
-| Epochs | 8 (best checkpoint by validation F1, reached at step 300 of 584) |
+| Epochs | 8, which is 584 optimizer steps; the recipe keeps the best checkpoint by validation F1 rather than the last |
 | Warmup Ratio | 0.15 |
 | LR Schedule | polynomial decay |
 | Max Sequence Length | 512 |
@@ -301,7 +302,7 @@ code comments claim, and why they must not be changed.
 - Trained on English repositories only. The tokenizer has no vocabulary for
   other languages, so a README in Spanish, French or Chinese is not read: on 93
   such repositories, this model gives the original and its own English
-  translation the same sector only 28% of the time.
+  translation the same sector only 19% of the time.
 - May not generalize to non-software repositories.
 - NAICS code 55 (Management of Companies) is absent from the training data, so
   the model cannot predict it. The 19 classes above are all it knows.
