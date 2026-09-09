@@ -21,7 +21,7 @@ Both are on the Hub; the next section says which to use.
 | Test accuracy | 86.72% | 86.95% |
 | Weighted F1 | 86.33% | 86.39% |
 | Macro F1 | 82.95% | 83.06% |
-| A README and its own translation get the same sector | 19% | 73% |
+| A README and its own translation get the same sector | 19% | 77% |
 | Train with | `--model roberta-large` | `--model bge-m3` |
 
 On English text they are indistinguishable; the difference is that only the
