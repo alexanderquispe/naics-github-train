@@ -230,12 +230,11 @@ text = format_model_input(
 )
 ```
 
-Measured over 25,000 GitHub repositories with this model's multilingual
-sibling, cleaned and uncleaned input give the same sector for 99.4% of the
-repositories it is confident about, and retention at a 0.8 threshold moves by
-0.1 points. The difference is small but it is free to get right, and on five
-short probes three moved across the 0.8 threshold that downstream pipelines
-filter on.
+Measured over 25,000 GitHub repositories with this model, cleaned and uncleaned
+input give the same sector for 99.1% of the repositories it is confident about,
+and retention at a 0.8 threshold moves by 0.3 points. The difference is small
+but it is free to get right, and on five short probes three moved across the 0.8
+threshold that downstream pipelines filter on.
 
 ### What the cleaning does, including two surprises
 
